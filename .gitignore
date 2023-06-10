@@ -1,0 +1,5 @@
+configs/**
+*.json
+db/**
+.vscode
+__debug_bin
