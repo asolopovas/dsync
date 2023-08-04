@@ -7,11 +7,13 @@ import (
 )
 
 func Run() {
-	var aFlag = flag.Bool("a", false, "Sync Files and DB")
-	var cFlag = flag.String("c", "dsync-config.json", "custom config path")
-	var fFlag = flag.Bool("f", false, "Sync files")
-	var dFlag = flag.Bool("d", false, "Sync Db")
+	var dump string
+	var aFlag = flag.Bool("a", false, "Sync Files and Database")
+	var cFlag = flag.String("c", "dsync-config.json", "Custom config path")
+	var fFlag = flag.Bool("f", false, "Sync Files only")
+	var dFlag = flag.Bool("d", false, "Sync Database only")
 	var gFlag = flag.Bool("g", false, "Generate default config")
+	var dumpFlag = flag.Bool("dump", false, "Dump Database to file")
 	flag.Parse()
 
 	if len(os.Args) == 1 {
@@ -39,7 +41,9 @@ func Run() {
 		}
 
 		if *dFlag {
-			SyncDb(conf)
+			dump, err = SyncDb(conf)
+			ErrChk(err)
+			WriteToLocalDB(dump, conf, *dumpFlag)
 		}
 	}
 }
