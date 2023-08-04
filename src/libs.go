@@ -109,11 +109,13 @@ func DumpRemoteDB(config JsonConfig) ([]byte, error) {
 }
 
 func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
+	fmt.Println("Writing to local DB")
 	sqlDump := []byte(sqlDumpStr)
 	var stdin bytes.Buffer
 	stdin.Write(sqlDump)
 
 	if dumpDb {
+		fmt.Println("saving db.sql...")
 		os.WriteFile("db.sql", sqlDump, 0644)
 	}
 
@@ -177,11 +179,10 @@ func SyncFiles(conf JsonConfig) {
 func SyncDb(conf JsonConfig) (string, error) {
 	var localDump string
 	remoteDump, err := DumpRemoteDB(conf)
-	if err == nil {
+	if err != nil {
 		return "", err
 	}
 
-	// Replace String in Local DB
 	localDump = string(remoteDump)
 	for _, item := range conf.DbReplace {
 		localDump = strings.Replace(localDump, item.From, item.To, -1)

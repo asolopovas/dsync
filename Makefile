@@ -7,3 +7,7 @@ build:
 
 install:
 	go install github.com/asolopovas/dsync@latest
+
+test:
+	 go run ./main.go -c ./dsync-config.json
+
