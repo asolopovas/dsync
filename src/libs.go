@@ -108,8 +108,43 @@ func DumpRemoteDB(config JsonConfig) ([]byte, error) {
 	return stdout.Bytes(), err
 }
 
+func createUserAndDB(dbName string, confLoc string) {
+	fmt.Println("Creating emptry db: `" + dbName + "`  if does not exist ...")
+
+	query := fmt.Sprintf(
+		"CREATE USER IF NOT EXISTS `%s`@'%%' IDENTIFIED BY 'secret'; "+
+			"CREATE DATABASE IF NOT EXISTS `%s`; "+
+			"GRANT ALL PRIVILEGES ON `%s`.* TO `%s`@'%%';",
+		dbName, dbName, dbName, dbName,
+	)
+
+	args := []string{
+		"compose",
+		"-f", confLoc,
+		"exec",
+		"-T",
+		"mariadb",
+		"mariadb",
+		"-uroot",
+		"-psecret",
+		"-e",
+		query,
+	}
+
+	cmd := exec.Command("docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Println("Error:", err)
+	}
+}
+
 func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 	fmt.Println("Writing to local DB")
+	confLoc := os.Getenv("HOME") + "/www/dev/docker-compose.yml"
+
+	createUserAndDB(conf.Local.Db, confLoc)
+
 	sqlDump := []byte(sqlDumpStr)
 	var stdin bytes.Buffer
 	stdin.Write(sqlDump)
@@ -119,14 +154,13 @@ func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 		os.WriteFile("db.sql", sqlDump, 0644)
 	}
 
-	os.Chdir(os.Getenv("HOME") + "/www/dev")
-
 	args := []string{
 		"compose",
+		"-f", confLoc,
 		"exec",
 		"-T",
 		"mariadb",
-		"mysql",
+		"mariadb",
 		"-uroot",
 		"-psecret",
 		conf.Local.Db,
