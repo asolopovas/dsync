@@ -128,10 +128,10 @@ func createUserAndDB(dbName string, confLoc string) {
 		"-uroot",
 		"-psecret",
 		"-e",
-		query,
 	}
 
-	cmd := exec.Command("docker", args...)
+	// fmt.Println("docker " + strings.Join(args, " ") + " QueryString")
+	cmd := exec.Command("docker", append(args, query)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -140,7 +140,19 @@ func createUserAndDB(dbName string, confLoc string) {
 }
 
 func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
-	fmt.Println("Writing to local DB")
+	fmt.Println("Writing remote database `" + conf.Remote.Db + "` to local with replacements:")
+
+	maxLen := 0
+	for _, item := range conf.DbReplace {
+		if len(item.From) > maxLen {
+			maxLen = len(item.From)
+		}
+	}
+
+	for _, item := range conf.DbReplace {
+		fmt.Printf("%-*s -> %s\n", maxLen, item.From, item.To)
+	}
+
 	confLoc := os.Getenv("HOME") + "/www/dev/docker-compose.yml"
 
 	createUserAndDB(conf.Local.Db, confLoc)
@@ -166,6 +178,8 @@ func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 		conf.Local.Db,
 	}
 
+	// fmt.Println("docker " + strings.Join(args, " "))
+
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = &stdin
 	cmd.Stdout = os.Stdout
@@ -183,7 +197,7 @@ func addTrailingSlash(str string) string {
 }
 
 func SyncFiles(conf JsonConfig) {
-	fmt.Println("Syncing Files")
+	fmt.Println("Syncing Files from remote to local using rsync")
 	for _, syncItem := range conf.Sync {
 		remotePath := addTrailingSlash(syncItem.Remote)
 		localPath := addTrailingSlash(syncItem.Local)
@@ -200,6 +214,8 @@ func SyncFiles(conf JsonConfig) {
 		args = append(args, conf.SshHost+":"+remotePath)
 		args = append(args, localPath)
 
+		fmt.Println("cmd:")
+		fmt.Println("rsync " + strings.Join(args, " "))
 		cmd := exec.Command("rsync", args...)
 
 		cmd.Stdout = os.Stdout
