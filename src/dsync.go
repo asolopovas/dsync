@@ -1,49 +1,98 @@
 package dsync
 
 import (
-	"flag"
 	"fmt"
+	"log"
 	"os"
+
+	"github.com/urfave/cli/v2"
 )
 
 func Run() {
-	var dump string
-	var aFlag = flag.Bool("a", false, "Sync Files and Database")
-	var cFlag = flag.String("c", "dsync-config.json", "Custom config path")
-	var fFlag = flag.Bool("f", false, "Sync Files only")
-	var dFlag = flag.Bool("d", false, "Sync Database only")
-	var gFlag = flag.Bool("g", false, "Generate default config")
-	var dumpFlag = flag.Bool("dump", false, "Dump Database to file")
-	flag.Parse()
+	app := &cli.App{
+		Name:                 "dsync",
+		Usage:                "A tool to sync files and databases between different environments",
+		EnableBashCompletion: true,
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name:  "a",
+				Usage: "Sync Files and Database",
+			},
+			&cli.StringFlag{
+				Name:  "c",
+				Value: "dsync-config.json",
+				Usage: "Custom config path",
+			},
+			&cli.BoolFlag{
+				Name:  "f",
+				Usage: "Sync Files only",
+			},
+			&cli.BoolFlag{
+				Name:  "d",
+				Usage: "Sync Database only",
+			},
+			&cli.BoolFlag{
+				Name:  "dump",
+				Usage: "Dump Database to file",
+			},
+			&cli.BoolFlag{
+				Name:  "g",
+				Usage: "Generate default config",
+			},
+			&cli.BoolFlag{
+				Name:  "v",
+				Usage: "Get Version",
+			},
+		},
+		Action: func(c *cli.Context) error {
+			if c.NumFlags() == 0 {
+				cli.ShowAppHelp(c)
+				return nil
+			}
 
-	if len(os.Args) == 1 {
-		flag.PrintDefaults()
-		return
+			if c.Bool("v") {
+				fmt.Println("v1.0.5")
+				return nil
+			}
+
+			if c.Bool("g") {
+				GenConfig()
+				return nil
+			}
+
+			conf, err := GetJsonConfig(c.String("c"))
+			if err != nil {
+				fmt.Printf("%s config could not be loaded\n", c.String("c"))
+				return err
+			}
+
+			if c.Bool("a") {
+				fmt.Println("Syncing Files and Database")
+				SyncFiles(conf)
+				SyncDb(conf)
+			} else {
+				if c.Bool("f") {
+					fmt.Println("Syncing Files")
+					SyncFiles(conf)
+				}
+
+				if c.Bool("d") {
+					fmt.Println("Syncing Database")
+					dump, err := SyncDb(conf)
+					if err != nil {
+						return err
+					}
+					WriteToLocalDB(dump, conf, c.Bool("dump"))
+				}
+			}
+			return nil
+		},
 	}
 
-	if *gFlag {
-		GenConfig()
-		return
-	}
-
-	conf, err := GetJsonConfig(*cFlag)
+	err := app.Run(os.Args)
 	if err != nil {
-		fmt.Println(*cFlag + " config could not be loaded")
-		return
-	}
-
-	if *aFlag {
-		SyncFiles(conf)
-		SyncDb(conf)
-	} else {
-		if *fFlag {
-			SyncFiles(conf)
-		}
-
-		if *dFlag {
-			dump, err = SyncDb(conf)
-			ErrChk(err)
-			WriteToLocalDB(dump, conf, *dumpFlag)
-		}
+		log.Fatal(err)
 	}
 }
+
+// Define other functions like GenConfig, GetJsonConfig, SyncFiles, SyncDb, WriteToLocalDB, etc.

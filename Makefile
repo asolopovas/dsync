@@ -5,7 +5,7 @@ build:
 	go build -o ./dist/dsync ./main.go
 	chmod +x ./dist/dsync
 
-local:
+install-local:
 	go build -o $(GOBIN)/dsync ./main.go
 	chmod +x $(GOBIN)/dsync
 

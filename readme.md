@@ -12,6 +12,11 @@ Dsync is a Go-built tool that syncs files and databases between different enviro
 - SSH access to the remote server.
 
 ## Installation
+Using `go install`:
+```
+go install github.com/asolopovas/dsync@latest
+```
+
 Clone the repo and build the app:
 ```
 git clone https://github.com/asolopovas/dsync.git go build -o $ABSOLUTE_PATH_TO_DSYNC main.go
@@ -32,6 +37,11 @@ Modify `dsync-config.json` as per your needs. The config file comprises:
 - Database replace rules for various environments.
 
 After configuring, sync files and database with:
+Version:
+
+```
+dsync -v
+```
 
 Sync All:
 ```
