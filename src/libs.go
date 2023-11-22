@@ -92,7 +92,7 @@ func GenConfig() {
 
 }
 
-func DumpRemoteDB(config JsonConfig) ([]byte, error) {
+func GetRemoveSqlString(config JsonConfig) string {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	// var stdin bytes.Buffer
@@ -105,7 +105,7 @@ func DumpRemoteDB(config JsonConfig) ([]byte, error) {
 	err := cmd.Wait()
 	ErrChk(err)
 
-	return stdout.Bytes(), err
+	return stdout.String()
 }
 
 func createUserAndDB(dbName string, confLoc string) {
@@ -183,6 +183,7 @@ func addTrailingSlash(str string) string {
 }
 
 func SyncFiles(conf JsonConfig) {
+	fmt.Println("Syncing Files")
 	for _, syncItem := range conf.Sync {
 		remotePath := addTrailingSlash(syncItem.Remote)
 		localPath := addTrailingSlash(syncItem.Local)
@@ -210,17 +211,12 @@ func SyncFiles(conf JsonConfig) {
 	}
 }
 
-func SyncDb(conf JsonConfig) (string, error) {
-	var localDump string
-	remoteDump, err := DumpRemoteDB(conf)
-	if err != nil {
-		return "", err
-	}
+func RemoteSqlStringToLocal(conf JsonConfig) string {
+	sqlString := GetRemoveSqlString(conf)
 
-	localDump = string(remoteDump)
 	for _, item := range conf.DbReplace {
-		localDump = strings.Replace(localDump, item.From, item.To, -1)
+		sqlString = strings.Replace(sqlString, item.From, item.To, -1)
 	}
 
-	return localDump, nil
+	return sqlString
 }

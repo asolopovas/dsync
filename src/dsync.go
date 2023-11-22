@@ -15,6 +15,12 @@ func Run() {
 	}
 }
 
+func WriteDB(conf JsonConfig, dumpDB bool) {
+	fmt.Println("Syncing Database")
+	transformedSqlString := RemoteSqlStringToLocal(conf)
+	WriteToLocalDB(transformedSqlString, conf, dumpDB)
+}
+
 func newRootCmd() *cobra.Command {
 	var (
 		syncFilesAndDB bool
@@ -30,8 +36,9 @@ func newRootCmd() *cobra.Command {
 		Use:   "dsync",
 		Short: "A tool to sync files and databases between different environments",
 		Run: func(cmd *cobra.Command, args []string) {
+			flagSet := syncFilesAndDB || syncFilesOnly || syncDBOnly || dumpDB || generateConfig || showVersion
 
-			if len(args) == 0 && !cmd.Flags().HasFlags() {
+			if len(args) == 0 && !flagSet {
 				cmd.Help()
 				return
 			}
@@ -54,24 +61,18 @@ func newRootCmd() *cobra.Command {
 			}
 
 			if syncFilesAndDB {
-				fmt.Println("Syncing Files and Database")
 				SyncFiles(conf)
-				SyncDb(conf)
-			} else {
-				if syncFilesOnly {
-					fmt.Println("Syncing Files")
-					SyncFiles(conf)
-				}
-
-				if syncDBOnly {
-					fmt.Println("Syncing Database")
-					dump, err := SyncDb(conf)
-					if err != nil {
-						log.Fatal(err)
-					}
-					WriteToLocalDB(dump, conf, dumpDB)
-				}
+				WriteDB(conf, dumpDB)
 			}
+
+			if syncFilesOnly {
+				SyncFiles(conf)
+			}
+
+			if syncDBOnly {
+				WriteDB(conf, dumpDB)
+			}
+
 		},
 	}
 
