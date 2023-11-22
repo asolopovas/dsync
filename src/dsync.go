@@ -31,9 +31,7 @@ func newRootCmd() *cobra.Command {
 		Short: "A tool to sync files and databases between different environments",
 		Run: func(cmd *cobra.Command, args []string) {
 
-			fmt.Println(len(args))
-
-			if len(args) == 0 {
+			if len(args) == 0 && !cmd.Flags().HasFlags() {
 				cmd.Help()
 				return
 			}
@@ -50,8 +48,9 @@ func newRootCmd() *cobra.Command {
 
 			conf, err := GetJsonConfig(configPath)
 			if err != nil {
-				fmt.Printf("%s config could not be loaded\n", configPath)
-				log.Fatal(err)
+				fmt.Fprintf(os.Stderr, "Error loading config file '%s': %v\n", configPath, err)
+				cmd.Help() // Display help message
+				return
 			}
 
 			if syncFilesAndDB {
