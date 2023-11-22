@@ -109,7 +109,7 @@ func GetRemoveSqlString(config JsonConfig) string {
 }
 
 func createUserAndDB(dbName string, confLoc string) {
-	fmt.Println("Creating emptry db: `" + dbName + "`  if does not exist ...")
+	fmt.Println("Database: `" + dbName + "` will be created if not exist")
 
 	query := fmt.Sprintf(
 		"CREATE USER IF NOT EXISTS `%s`@'%%' IDENTIFIED BY 'secret'; "+
