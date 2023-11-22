@@ -4,9 +4,35 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/urfave/cli/v2"
 )
+
+func generateFishCompletion(c *cli.Context) error {
+	script, err := c.App.ToFishCompletion()
+	if err != nil {
+		return err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	fishCompletionDir := filepath.Join(homeDir, ".config", "fish", "completions")
+	if err := os.MkdirAll(fishCompletionDir, os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create fish completions directory: %w", err)
+	}
+
+	fishCompletionFile := filepath.Join(fishCompletionDir, "dsync.fish")
+	if err := os.WriteFile(fishCompletionFile, []byte(script), 0644); err != nil {
+		return fmt.Errorf("failed to write fish completion file: %w", err)
+	}
+
+	fmt.Printf("Fish completion script generated at: %s\n", fishCompletionFile)
+	return nil
+}
 
 func Run() {
 	app := &cli.App{
@@ -17,11 +43,6 @@ func Run() {
 			&cli.BoolFlag{
 				Name:  "a",
 				Usage: "Sync Files and Database",
-			},
-			&cli.StringFlag{
-				Name:  "c",
-				Value: "dsync-config.json",
-				Usage: "Custom config path",
 			},
 			&cli.BoolFlag{
 				Name:  "f",
@@ -42,6 +63,12 @@ func Run() {
 			&cli.BoolFlag{
 				Name:  "v",
 				Usage: "Get Version",
+			},
+
+			&cli.StringFlag{
+				Name:  "c",
+				Value: "dsync-config.json",
+				Usage: "Custom config path",
 			},
 		},
 		Action: func(c *cli.Context) error {
@@ -67,8 +94,9 @@ func Run() {
 			}
 
 			if c.Bool("a") {
-				fmt.Println("Syncing Files and Database")
+				fmt.Println("Syncing Files")
 				SyncFiles(conf)
+				fmt.Println("Syncing Database")
 				SyncDb(conf)
 			} else {
 				if c.Bool("f") {
@@ -87,6 +115,13 @@ func Run() {
 			}
 			return nil
 		},
+		Commands: []*cli.Command{
+			{
+				Name:   "completion",
+				Usage:  "Generate fish completion script",
+				Action: generateFishCompletion,
+			},
+		},
 	}
 
 	err := app.Run(os.Args)
@@ -94,5 +129,3 @@ func Run() {
 		log.Fatal(err)
 	}
 }
-
-// Define other functions like GenConfig, GetJsonConfig, SyncFiles, SyncDb, WriteToLocalDB, etc.
