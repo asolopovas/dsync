@@ -6,126 +6,118 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/urfave/cli/v2"
+	"github.com/spf13/cobra"
 )
 
-func generateFishCompletion(c *cli.Context) error {
-	script, err := c.App.ToFishCompletion()
-	if err != nil {
-		return err
+func Run() {
+	if err := newRootCmd().Execute(); err != nil {
+		log.Fatal(err)
 	}
-
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
-	}
-
-	fishCompletionDir := filepath.Join(homeDir, ".config", "fish", "completions")
-	if err := os.MkdirAll(fishCompletionDir, os.ModePerm); err != nil {
-		return fmt.Errorf("failed to create fish completions directory: %w", err)
-	}
-
-	fishCompletionFile := filepath.Join(fishCompletionDir, "dsync.fish")
-	if err := os.WriteFile(fishCompletionFile, []byte(script), 0644); err != nil {
-		return fmt.Errorf("failed to write fish completion file: %w", err)
-	}
-
-	fmt.Printf("Fish completion script generated at: %s\n", fishCompletionFile)
-	return nil
 }
 
-func Run() {
-	app := &cli.App{
-		Name:                 "dsync",
-		Usage:                "A tool to sync files and databases between different environments",
-		EnableBashCompletion: true,
-		Flags: []cli.Flag{
-			&cli.BoolFlag{
-				Name:  "a",
-				Usage: "Sync Files and Database",
-			},
-			&cli.BoolFlag{
-				Name:  "f",
-				Usage: "Sync Files only",
-			},
-			&cli.BoolFlag{
-				Name:  "d",
-				Usage: "Sync Database only",
-			},
-			&cli.BoolFlag{
-				Name:  "dump",
-				Usage: "Dump Database to file",
-			},
-			&cli.BoolFlag{
-				Name:  "g",
-				Usage: "Generate default config",
-			},
-			&cli.BoolFlag{
-				Name:  "v",
-				Usage: "Get Version",
-			},
+func newRootCmd() *cobra.Command {
+	var (
+		syncFilesAndDB bool
+		syncFilesOnly  bool
+		syncDBOnly     bool
+		dumpDB         bool
+		generateConfig bool
+		showVersion    bool
+		configPath     string
+	)
 
-			&cli.StringFlag{
-				Name:  "c",
-				Value: "dsync-config.json",
-				Usage: "Custom config path",
-			},
-		},
-		Action: func(c *cli.Context) error {
-			if c.NumFlags() == 0 {
-				cli.ShowAppHelp(c)
-				return nil
+	var rootCmd = &cobra.Command{
+		Use:   "dsync",
+		Short: "A tool to sync files and databases between different environments",
+		Run: func(cmd *cobra.Command, args []string) {
+
+			fmt.Println(len(args))
+
+			if len(args) == 0 {
+				cmd.Help()
+				return
 			}
 
-			if c.Bool("v") {
+			if showVersion {
 				fmt.Println("v1.0.5")
-				return nil
+				return
 			}
 
-			if c.Bool("g") {
+			if generateConfig {
 				GenConfig()
-				return nil
+				return
 			}
 
-			conf, err := GetJsonConfig(c.String("c"))
+			conf, err := GetJsonConfig(configPath)
 			if err != nil {
-				fmt.Printf("%s config could not be loaded\n", c.String("c"))
-				return err
+				fmt.Printf("%s config could not be loaded\n", configPath)
+				log.Fatal(err)
 			}
 
-			if c.Bool("a") {
-				fmt.Println("Syncing Files")
+			if syncFilesAndDB {
+				fmt.Println("Syncing Files and Database")
 				SyncFiles(conf)
-				fmt.Println("Syncing Database")
 				SyncDb(conf)
 			} else {
-				if c.Bool("f") {
+				if syncFilesOnly {
 					fmt.Println("Syncing Files")
 					SyncFiles(conf)
 				}
 
-				if c.Bool("d") {
+				if syncDBOnly {
 					fmt.Println("Syncing Database")
 					dump, err := SyncDb(conf)
 					if err != nil {
-						return err
+						log.Fatal(err)
 					}
-					WriteToLocalDB(dump, conf, c.Bool("dump"))
+					WriteToLocalDB(dump, conf, dumpDB)
 				}
 			}
-			return nil
-		},
-		Commands: []*cli.Command{
-			{
-				Name:   "completion",
-				Usage:  "Generate fish completion script",
-				Action: generateFishCompletion,
-			},
 		},
 	}
 
-	err := app.Run(os.Args)
-	if err != nil {
-		log.Fatal(err)
+	rootCmd.Flags().BoolVarP(&syncFilesAndDB, "a", "a", false, "Sync Files and Database")
+	rootCmd.Flags().BoolVarP(&syncFilesOnly, "f", "f", false, "Sync Files only")
+	rootCmd.Flags().BoolVarP(&syncDBOnly, "d", "d", false, "Sync Database only")
+	rootCmd.Flags().BoolVarP(&dumpDB, "dump", "", false, "Dump Database to file") // Changed here
+	rootCmd.Flags().BoolVarP(&generateConfig, "g", "g", false, "Generate default config")
+	rootCmd.Flags().BoolVarP(&showVersion, "v", "v", false, "Get Version")
+	rootCmd.Flags().StringVarP(&configPath, "c", "c", "dsync-config.json", "Custom config path")
+
+	rootCmd.AddCommand(newCompletionCmd())
+
+	return rootCmd
+}
+
+func newCompletionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "completion",
+		Short: "Generate fish completion script",
+		Run:   generateFishCompletion,
 	}
+}
+
+func generateFishCompletion(cmd *cobra.Command, args []string) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("failed to get user home directory: %v", err)
+	}
+
+	fishCompletionDir := filepath.Join(homeDir, ".config", "fish", "completions")
+	if err := os.MkdirAll(fishCompletionDir, os.ModePerm); err != nil {
+		log.Fatalf("failed to create fish completions directory: %v", err)
+	}
+
+	fishCompletionFile := filepath.Join(fishCompletionDir, "dsync.fish")
+	f, err := os.Create(fishCompletionFile)
+	if err != nil {
+		log.Fatalf("failed to create fish completion file: %v", err)
+	}
+	defer f.Close()
+
+	if err := cmd.Root().GenFishCompletion(f, true); err != nil {
+		log.Fatalf("failed to generate fish completion script: %v", err)
+	}
+
+	fmt.Printf("Fish completion script generated at: %s\n", fishCompletionFile)
 }
