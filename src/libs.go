@@ -109,7 +109,6 @@ func GetRemoveSqlString(config JsonConfig) string {
 }
 
 func createUserAndDB(dbName string, confLoc string) {
-	fmt.Println("Database: `" + dbName + "` will be created if not exist")
 
 	query := fmt.Sprintf(
 		"CREATE USER IF NOT EXISTS `%s`@'%%' IDENTIFIED BY 'secret'; "+
@@ -139,8 +138,14 @@ func createUserAndDB(dbName string, confLoc string) {
 	}
 }
 
-func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
-	fmt.Println("Writing remote database `" + conf.Remote.Db + "` to local with replacements:")
+func WriteRemoteToLocalDb(conf JsonConfig, dumpDB bool) {
+	transformedSqlString := RemoteSqlStringToLocal(conf)
+
+	msg := "Writing remote database `" + conf.Remote.Db + "` to local with replacements: "
+	dashes := strings.Repeat("-", len(msg)+2)
+	fmt.Println(dashes)
+	fmt.Println("Database `" + conf.Local.Db + "` will be created if not exist")
+	fmt.Println(msg)
 
 	maxLen := 0
 	for _, item := range conf.DbReplace {
@@ -152,6 +157,13 @@ func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 	for _, item := range conf.DbReplace {
 		fmt.Printf("%-*s -> %s\n", maxLen, item.From, item.To)
 	}
+
+	WriteToLocalDb(transformedSqlString, conf, dumpDB)
+
+	fmt.Println(dashes + " \n")
+}
+
+func WriteToLocalDb(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 
 	confLoc := os.Getenv("HOME") + "/www/dev/docker-compose.yml"
 
@@ -179,7 +191,6 @@ func WriteToLocalDB(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 	}
 
 	// fmt.Println("docker " + strings.Join(args, " "))
-
 	cmd := exec.Command("docker", args...)
 	cmd.Stdin = &stdin
 	cmd.Stdout = os.Stdout
@@ -197,10 +208,32 @@ func addTrailingSlash(str string) string {
 }
 
 func SyncFiles(conf JsonConfig) {
-	fmt.Println("Syncing Files from remote to local using rsync")
+	msg := "Syncing Files from remote to local using rsync"
+
+	maxLen := 0
+	for _, item := range conf.Sync {
+		if len(item.Remote) > maxLen {
+			maxLen = len(item.Local)
+		}
+	}
+	dashes := strings.Repeat("-", maxLen*2+5)
+	fmt.Println(dashes)
+	fmt.Println(msg)
+
+	fmt.Println(dashes)
+
 	for _, syncItem := range conf.Sync {
 		remotePath := addTrailingSlash(syncItem.Remote)
 		localPath := addTrailingSlash(syncItem.Local)
+
+		fmt.Printf("%-*s -> %s\n\n", maxLen, remotePath, localPath)
+
+		fmt.Println("Excluding:")
+		for _, v := range syncItem.Exclude {
+			fmt.Println("  - " + v)
+		}
+
+		fmt.Println("")
 
 		args := []string{
 			"-azr",
@@ -214,8 +247,7 @@ func SyncFiles(conf JsonConfig) {
 		args = append(args, conf.SshHost+":"+remotePath)
 		args = append(args, localPath)
 
-		fmt.Println("cmd:")
-		fmt.Println("rsync " + strings.Join(args, " "))
+		// fmt.Println("rsync " + strings.Join(args, " "))
 		cmd := exec.Command("rsync", args...)
 
 		cmd.Stdout = os.Stdout
@@ -224,6 +256,9 @@ func SyncFiles(conf JsonConfig) {
 		if err != nil {
 			fmt.Printf("cmd.Run() failed with %s\n", err)
 		}
+
+		fmt.Println("")
+
 	}
 }
 

@@ -15,11 +15,6 @@ func Run() {
 	}
 }
 
-func WriteDB(conf JsonConfig, dumpDB bool) {
-	transformedSqlString := RemoteSqlStringToLocal(conf)
-	WriteToLocalDB(transformedSqlString, conf, dumpDB)
-}
-
 func newRootCmd() *cobra.Command {
 	var (
 		syncFilesAndDB bool
@@ -61,7 +56,7 @@ func newRootCmd() *cobra.Command {
 
 			if syncFilesAndDB {
 				SyncFiles(conf)
-				WriteDB(conf, dumpDB)
+				WriteRemoteToLocalDb(conf, dumpDB)
 			}
 
 			if syncFilesOnly {
@@ -69,7 +64,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			if syncDBOnly {
-				WriteDB(conf, dumpDB)
+				WriteRemoteToLocalDb(conf, dumpDB)
 			}
 
 		},
