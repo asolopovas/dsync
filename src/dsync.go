@@ -28,7 +28,7 @@ func newRootCmd() *cobra.Command {
 
 	var rootCmd = &cobra.Command{
 		Use:   "dsync",
-		Short: "A tool to sync files and databases between different environments version: v1.0.5",
+		Short: "A tool to sync files and databases between different environments version: v1.0.6",
 		Run: func(cmd *cobra.Command, args []string) {
 			flagSet := syncFilesAndDB || syncFilesOnly || syncDBOnly || dumpDB || generateConfig || showVersion
 
@@ -38,7 +38,7 @@ func newRootCmd() *cobra.Command {
 			}
 
 			if showVersion {
-				fmt.Println("v1.0.5")
+				fmt.Println("v1.0.6")
 				return
 			}
 

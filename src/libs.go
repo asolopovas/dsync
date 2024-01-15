@@ -12,6 +12,7 @@ import (
 
 type JsonConfig struct {
 	SshHost   string             `json:"sshHost"`
+	Port      string             `json:"port"`
 	Remote    RemoteHostSettings `json:"remote"`
 	Local     LocalHostSettings  `json:"local"`
 	DbReplace []DbReplace        `json:"dbReplace"`
@@ -53,7 +54,8 @@ func GetJsonConfig(configPath string) (JsonConfig, error) {
 
 func GenConfig() {
 	defaultConf := []byte(`{
-		"sshHost": "user@host.com",
+		"host": "user@host.com",
+		"port": 22,
 		"remote": {
 			"db": "db"
 		},
@@ -237,6 +239,8 @@ func SyncFiles(conf JsonConfig) {
 
 		args := []string{
 			"-azr",
+			"-e",
+			"ssh -p " + conf.Port,
 			"--info=progress2",
 		}
 
