@@ -98,8 +98,15 @@ func GetRemoveSqlString(config JsonConfig) string {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	// var stdin bytes.Buffer
-	args := []string{config.SshHost, "mysqldump -uroot", config.Remote.Db}
 
+	args := []string{
+		config.SshHost,
+		"-p " + config.Port,
+		"mysqldump -uroot",
+		config.Remote.Db,
+	}
+
+	fmt.Println(args)
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
