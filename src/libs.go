@@ -94,7 +94,7 @@ func GenConfig() {
 
 }
 
-func GetRemoveSqlString(config JsonConfig) string {
+func GetRemoteSqlString(config JsonConfig) string {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	// var stdin bytes.Buffer
@@ -106,8 +106,27 @@ func GetRemoveSqlString(config JsonConfig) string {
 		config.Remote.Db,
 	}
 
-	fmt.Println(args)
 	cmd := exec.Command("ssh", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Start()
+	err := cmd.Wait()
+	ErrChk(err)
+
+	return stdout.String()
+}
+
+func GetLocalSqlString(config JsonConfig) string {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	// var stdin bytes.Buffer
+
+	args := []string{
+		"-uroot",
+		config.Remote.Db,
+	}
+
+	cmd := exec.Command("mysqldump", args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Start()
@@ -208,6 +227,25 @@ func WriteToLocalDb(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
 	cmd.Run()
 }
 
+func WriteToRemoteDb(sqlDumpStr string, conf JsonConfig) {
+	sqlDump := []byte(sqlDumpStr)
+	var stdin bytes.Buffer
+	stdin.Write(sqlDump)
+
+	args := []string{
+		conf.SshHost,
+	}
+
+	cmd := exec.Command("ssh", args...)
+
+	cmd.Stdin = &stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	cmd.Run()
+
+}
+
 func addTrailingSlash(str string) string {
 	match, _ := regexp.MatchString("/$", str)
 	if match {
@@ -274,7 +312,7 @@ func SyncFiles(conf JsonConfig) {
 }
 
 func RemoteSqlStringToLocal(conf JsonConfig) string {
-	sqlString := GetRemoveSqlString(conf)
+	sqlString := GetRemoteSqlString(conf)
 
 	for _, item := range conf.DbReplace {
 		sqlString = strings.Replace(sqlString, item.From, item.To, -1)
