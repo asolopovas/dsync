@@ -272,12 +272,13 @@ func SyncFiles(conf JsonConfig) {
 
 		fmt.Printf("%-*s -> %s\n\n", maxLen, remotePath, localPath)
 
-		fmt.Println("Excluding:")
+		if len(syncItem.Exclude) > 0 {
+			fmt.Println("Excluding:")
+		}
+
 		for _, v := range syncItem.Exclude {
 			fmt.Println("  - " + v)
 		}
-
-		fmt.Println("")
 
 		args := []string{
 			"-azr",
