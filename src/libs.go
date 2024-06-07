@@ -170,7 +170,6 @@ func WriteRemoteToLocalDb(conf JsonConfig, dumpDB bool) {
 	transformedSqlString := RemoteSqlStringToLocal(conf)
 
 	msg := "Writing remote database `" + conf.Remote.Db + "` to local with replacements: "
-	dashes := strings.Repeat("-", len(msg)+2)
 	fmt.Println("Database `" + conf.Local.Db + "` will be created if not exist")
 	fmt.Println(msg)
 
