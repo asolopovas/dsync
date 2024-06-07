@@ -171,7 +171,6 @@ func WriteRemoteToLocalDb(conf JsonConfig, dumpDB bool) {
 
 	msg := "Writing remote database `" + conf.Remote.Db + "` to local with replacements: "
 	dashes := strings.Repeat("-", len(msg)+2)
-	fmt.Println(dashes)
 	fmt.Println("Database `" + conf.Local.Db + "` will be created if not exist")
 	fmt.Println(msg)
 
@@ -188,7 +187,6 @@ func WriteRemoteToLocalDb(conf JsonConfig, dumpDB bool) {
 
 	WriteToLocalDb(transformedSqlString, conf, dumpDB)
 
-	fmt.Println(dashes + " \n")
 }
 
 func WriteToLocalDb(sqlDumpStr string, conf JsonConfig, dumpDb bool) {
@@ -263,7 +261,7 @@ func SyncFiles(conf JsonConfig) {
 			maxLen = len(item.Local)
 		}
 	}
-	dashes := strings.Repeat("-", maxLen*2+5)
+	dashes := strings.Repeat("-", maxLen)
 	fmt.Println(dashes)
 	fmt.Println(msg)
 
