@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
 )
 
@@ -44,12 +45,16 @@ func newRootCmd() *cobra.Command {
 			}
 
 			if showVersion {
-				fmt.Println(strings.TrimSpace(version))
+				pterm.Println(strings.TrimSpace(version))
 				return nil
 			}
 
 			if generateConfig {
-				return GenerateConfig("dsync-config.json")
+				if err := GenerateConfig("dsync-config.json"); err != nil {
+					return err
+				}
+				pterm.Success.Println("Generated dsync-config.json")
+				return nil
 			}
 
 			cfg, err := LoadConfig(configPath)
@@ -110,7 +115,7 @@ func newCompletionCmd() *cobra.Command {
 				return fmt.Errorf("failed to generate fish completion: %w", err)
 			}
 
-			fmt.Printf("Fish completion generated at: %s\n", filePath)
+			pterm.Success.Printf("Fish completion generated at: %s\n", filePath)
 			return nil
 		},
 	}

@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/pterm/pterm"
 )
 
 func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
+	direction := "remote to local"
 	if reverse {
-		fmt.Println("Syncing Files from local to remote using rsync")
-	} else {
-		fmt.Println("Syncing Files from remote to local using rsync")
+		direction = "local to remote"
 	}
-	fmt.Println(strings.Repeat("-", 50))
+	pterm.DefaultSection.Printf("Syncing Files (%s)\n", direction)
 
 	maxLen := 0
 	for _, item := range cfg.Sync {
@@ -27,22 +27,30 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 		remotePath := ensureTrailingSlash(item.Remote)
 		localPath := ensureTrailingSlash(item.Local)
 
+		var msg string
 		if reverse {
-			fmt.Printf("%-*s -> %s\n", maxLen, localPath, remotePath)
+			msg = fmt.Sprintf("%s -> %s", localPath, remotePath)
 		} else {
-			fmt.Printf("%-*s -> %s\n", maxLen, remotePath, localPath)
+			msg = fmt.Sprintf("%s -> %s", remotePath, localPath)
 		}
+
+		pterm.DefaultBulletList.WithItems([]pterm.BulletListItem{
+			{Level: 0, Text: msg, TextStyle: pterm.NewStyle(pterm.FgCyan)},
+		}).Render()
 
 		if len(item.Exclude) > 0 {
-			fmt.Println("  Excluding:")
+			var excludes []pterm.BulletListItem
 			for _, v := range item.Exclude {
-				fmt.Printf("    - %s\n", v)
+				excludes = append(excludes, pterm.BulletListItem{Level: 1, Text: "Exclude: " + v, TextStyle: pterm.NewStyle(pterm.FgGray)})
 			}
+			pterm.DefaultBulletList.WithItems(excludes).Render()
 		}
 
+		spinner, _ := pterm.DefaultSpinner.Start("Running rsync...")
 		if err := runRsync(ctx, cfg, item, remotePath, localPath, reverse); err != nil {
-			fmt.Printf("Error syncing %s: %v\n", remotePath, err)
-			// Continue syncing other paths? Original code did.
+			spinner.Fail(fmt.Sprintf("Rsync failed: %v", err))
+		} else {
+			spinner.Success("Rsync completed")
 		}
 		fmt.Println()
 	}
@@ -67,10 +75,12 @@ func runRsync(ctx context.Context, cfg *Config, item SyncPath, remotePath, local
 	}
 
 	cmd := exec.CommandContext(ctx, "rsync", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, string(output))
+	}
 
-	return cmd.Run()
+	return nil
 }
 
 func ensureTrailingSlash(s string) string {

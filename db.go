@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/pterm/pterm"
 )
 
 type DBProvider interface {
@@ -31,43 +33,56 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 		return syncDBReverse(ctx, provider, cfg, dumpDB)
 	}
 
+	pterm.DefaultSection.Println("Syncing Database (remote to local)")
+
 	// 1. Dump remote DB
-	fmt.Printf("Dumping remote database '%s'...\n", cfg.Remote.DB)
+	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping remote database '%s'...", cfg.Remote.DB))
 	sqlDump, err := provider.DumpRemote(ctx)
 	if err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to dump remote db: %v", err))
 		return fmt.Errorf("failed to dump remote db: %w", err)
 	}
+	spinner.Success(fmt.Sprintf("Dumped remote database '%s'", cfg.Remote.DB))
 
 	// 2. Apply replacements
-	fmt.Println("Applying replacements...")
+	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements...")
 	sqlDump = ApplyDBReplacements(sqlDump, cfg.DBReplace)
+	spinner.Success("Applied replacements")
 
 	// 3. Write to local DB
-	fmt.Printf("Writing to local database '%s'...\n", cfg.Local.DB)
+	spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Writing to local database '%s'...", cfg.Local.DB))
 	if err := provider.WriteLocal(ctx, sqlDump); err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to write to local db: %v", err))
 		return fmt.Errorf("failed to write to local db: %w", err)
 	}
+	spinner.Success(fmt.Sprintf("Wrote to local database '%s'", cfg.Local.DB))
 
 	if dumpDB {
-		fmt.Println("Saving db.sql...")
+		spinner, _ = pterm.DefaultSpinner.Start("Saving db.sql...")
 		if err := os.WriteFile("db.sql", []byte(sqlDump), 0644); err != nil {
+			spinner.Fail(fmt.Sprintf("Failed to save db.sql: %v", err))
 			return fmt.Errorf("failed to save db.sql: %w", err)
 		}
+		spinner.Success("Saved db.sql")
 	}
 
 	return nil
 }
 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
+	pterm.DefaultSection.Println("Syncing Database (local to remote)")
+
 	// 1. Dump local DB
-	fmt.Printf("Dumping local database '%s'...\n", cfg.Local.DB)
+	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping local database '%s'...", cfg.Local.DB))
 	sqlDump, err := provider.DumpLocal(ctx)
 	if err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to dump local db: %v", err))
 		return fmt.Errorf("failed to dump local db: %w", err)
 	}
+	spinner.Success(fmt.Sprintf("Dumped local database '%s'", cfg.Local.DB))
 
 	// 2. Apply replacements (Reversed)
-	fmt.Println("Applying replacements (Reverse)...")
+	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements (Reverse)...")
 	var reversedReplacements []DBReplace
 	// Iterate backwards to ensure correct order of operations (e.g. protocol replacement before domain replacement)
 	for i := len(cfg.DBReplace) - 1; i >= 0; i-- {
@@ -75,25 +90,32 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
 	sqlDump = ApplyDBReplacements(sqlDump, reversedReplacements)
+	spinner.Success("Applied replacements (Reverse)")
 
 	if dumpDB {
-		fmt.Println("Saving db_reverse.sql...")
+		spinner, _ = pterm.DefaultSpinner.Start("Saving db_reverse.sql...")
 		if err := os.WriteFile("db_reverse.sql", []byte(sqlDump), 0644); err != nil {
+			spinner.Fail(fmt.Sprintf("Failed to save db_reverse.sql: %v", err))
 			return fmt.Errorf("failed to save db_reverse.sql: %w", err)
 		}
+		spinner.Success("Saved db_reverse.sql")
 	}
 
 	// 3. Backup Remote DB
-	fmt.Println("Backing up remote database...")
+	spinner, _ = pterm.DefaultSpinner.Start("Backing up remote database...")
 	if err := provider.BackupRemote(ctx); err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to backup remote db: %v", err))
 		return fmt.Errorf("failed to backup remote db: %w", err)
 	}
+	spinner.Success("Backed up remote database")
 
 	// 4. Write to remote DB
-	fmt.Printf("Writing to remote database '%s'...\n", cfg.Remote.DB)
+	spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Writing to remote database '%s'...", cfg.Remote.DB))
 	if err := provider.WriteRemote(ctx, sqlDump); err != nil {
+		spinner.Fail(fmt.Sprintf("Failed to write to remote db: %v", err))
 		return fmt.Errorf("failed to write to remote db: %w", err)
 	}
+	spinner.Success(fmt.Sprintf("Wrote to remote database '%s'", cfg.Remote.DB))
 
 	return nil
 }
@@ -163,11 +185,9 @@ func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump string) error 
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin = strings.NewReader(sqlDump)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ssh command failed: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ssh command failed: %s: %w", string(output), err)
 	}
 
 	return nil
@@ -191,11 +211,9 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump string) error {
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = strings.NewReader(sqlDump)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker command failed: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker command failed: %s: %w", string(output), err)
 	}
 
 	return nil
@@ -214,13 +232,10 @@ func (p *RealDBProvider) BackupRemote(ctx context.Context) error {
 		remoteCmd,
 	}
 
-	fmt.Printf("Creating remote backup: %s\n", backupFile)
 	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ssh backup command failed: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ssh backup command failed: %s: %w", string(output), err)
 	}
 	return nil
 }
@@ -243,11 +258,9 @@ func ensureUserAndDB(ctx context.Context, dbName, composeFile string) error {
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to create user/db: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to create user/db: %s: %w", string(output), err)
 	}
 	return nil
 }
@@ -261,19 +274,10 @@ func getComposeFilePath() string {
 }
 
 func ApplyDBReplacements(sql string, replacements []DBReplace) string {
-	maxLen := 0
 	for _, item := range replacements {
-		if len(item.From) > maxLen {
-			maxLen = len(item.From)
-		}
-	}
-
-	for _, item := range replacements {
-		fmt.Printf("%-*s -> %s\n", maxLen, item.From, item.To)
 		sql = strings.ReplaceAll(sql, item.From, item.To)
 
 		// Handle JSON-escaped slashes (e.g. "http:\/\/")
-		// Common in JSON embedded in HTML or PHP serialized data
 		fromJSON := strings.ReplaceAll(item.From, "/", `\/`)
 		toJSON := strings.ReplaceAll(item.To, "/", `\/`)
 		if fromJSON != item.From {
@@ -281,7 +285,6 @@ func ApplyDBReplacements(sql string, replacements []DBReplace) string {
 		}
 
 		// Handle Double-escaped slashes (e.g. "http:\\/\\/")
-		// Common in SQL dumps of JSON data where backslashes are escaped
 		fromDouble := strings.ReplaceAll(item.From, "/", `\\/`)
 		toDouble := strings.ReplaceAll(item.To, "/", `\\/`)
 		if fromDouble != item.From {
