@@ -8,8 +8,12 @@ import (
 	"strings"
 )
 
-func SyncFiles(ctx context.Context, cfg *Config) error {
-	fmt.Println("Syncing Files from remote to local using rsync")
+func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
+	if reverse {
+		fmt.Println("Syncing Files from local to remote using rsync")
+	} else {
+		fmt.Println("Syncing Files from remote to local using rsync")
+	}
 	fmt.Println(strings.Repeat("-", 50))
 
 	maxLen := 0
@@ -23,7 +27,12 @@ func SyncFiles(ctx context.Context, cfg *Config) error {
 		remotePath := ensureTrailingSlash(item.Remote)
 		localPath := ensureTrailingSlash(item.Local)
 
-		fmt.Printf("%-*s -> %s\n", maxLen, remotePath, localPath)
+		if reverse {
+			fmt.Printf("%-*s -> %s\n", maxLen, localPath, remotePath)
+		} else {
+			fmt.Printf("%-*s -> %s\n", maxLen, remotePath, localPath)
+		}
+
 		if len(item.Exclude) > 0 {
 			fmt.Println("  Excluding:")
 			for _, v := range item.Exclude {
@@ -31,7 +40,7 @@ func SyncFiles(ctx context.Context, cfg *Config) error {
 			}
 		}
 
-		if err := runRsync(ctx, cfg, item, remotePath, localPath); err != nil {
+		if err := runRsync(ctx, cfg, item, remotePath, localPath, reverse); err != nil {
 			fmt.Printf("Error syncing %s: %v\n", remotePath, err)
 			// Continue syncing other paths? Original code did.
 		}
@@ -40,7 +49,7 @@ func SyncFiles(ctx context.Context, cfg *Config) error {
 	return nil
 }
 
-func runRsync(ctx context.Context, cfg *Config, item SyncPath, remotePath, localPath string) error {
+func runRsync(ctx context.Context, cfg *Config, item SyncPath, remotePath, localPath string, reverse bool) error {
 	args := []string{
 		"-azr",
 		"-e", "ssh -p " + cfg.Port,
@@ -51,7 +60,11 @@ func runRsync(ctx context.Context, cfg *Config, item SyncPath, remotePath, local
 		args = append(args, "--exclude="+v)
 	}
 
-	args = append(args, cfg.SSHHost+":"+remotePath, localPath)
+	if reverse {
+		args = append(args, localPath, cfg.SSHHost+":"+remotePath)
+	} else {
+		args = append(args, cfg.SSHHost+":"+remotePath, localPath)
+	}
 
 	cmd := exec.CommandContext(ctx, "rsync", args...)
 	cmd.Stdout = os.Stdout

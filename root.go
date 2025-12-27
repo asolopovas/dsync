@@ -28,6 +28,7 @@ func newRootCmd() *cobra.Command {
 		dumpDB         bool
 		generateConfig bool
 		showVersion    bool
+		reverseSync    bool
 		configPath     string
 	)
 
@@ -57,15 +58,16 @@ func newRootCmd() *cobra.Command {
 			}
 
 			ctx := context.Background()
+			dbProvider := NewRealDBProvider(cfg)
 
 			if syncFilesAndDB || syncFilesOnly {
-				if err := SyncFiles(ctx, cfg); err != nil {
+				if err := SyncFiles(ctx, cfg, reverseSync); err != nil {
 					return err
 				}
 			}
 
 			if syncFilesAndDB || syncDBOnly {
-				if err := SyncDB(ctx, cfg, dumpDB); err != nil {
+				if err := SyncDB(ctx, dbProvider, cfg, dumpDB, reverseSync); err != nil {
 					return err
 				}
 			}
@@ -80,6 +82,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&dumpDB, "dump", "", false, "Dump Database to file")
 	rootCmd.Flags().BoolVarP(&generateConfig, "gen", "g", false, "Generate default config")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Get Version")
+	rootCmd.Flags().BoolVarP(&reverseSync, "reverse", "r", false, "Reverse sync (Local to Remote)")
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "dsync-config.json", "Custom config path")
 
 	rootCmd.AddCommand(newCompletionCmd())
