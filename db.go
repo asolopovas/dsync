@@ -117,11 +117,13 @@ func (p *RealDBProvider) DumpRemote(ctx context.Context) (string, error) {
 
 func (p *RealDBProvider) DumpLocal(ctx context.Context) (string, error) {
 	composeFile := getComposeFilePath()
+
+	// Try mariadb-dump first (modern MariaDB containers)
 	args := []string{
 		"compose",
 		"-f", composeFile,
 		"exec", "-T",
-		"mariadb", "mysqldump",
+		"mariadb", "mariadb-dump",
 		"-uroot", "-psecret",
 		p.cfg.Local.DB,
 	}
@@ -131,8 +133,20 @@ func (p *RealDBProvider) DumpLocal(ctx context.Context) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
+	if err := cmd.Run(); err == nil {
+		return stdout.String(), nil
+	}
+
+	// Fallback to mysqldump (older containers or MySQL)
+	args[6] = "mysqldump"
+	cmd = exec.CommandContext(ctx, "docker", args...)
+	stdout.Reset()
+	stderr.Reset()
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker command failed: %s: %w", stderr.String(), err)
+		return "", fmt.Errorf("docker command failed (stderr: %s): %w", stderr.String(), err)
 	}
 
 	return stdout.String(), nil
