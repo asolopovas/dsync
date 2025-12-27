@@ -1,19 +1,19 @@
 start:
-	go run ./main.go
+	go run .
 
 build:
-	go build -o ./dist/dsync ./main.go
+	go build -o ./dist/dsync .
 	chmod +x ./dist/dsync
 
 install-local:
-	go build -o $(GOBIN)/dsync ./main.go
+	go build -o $(GOBIN)/dsync .
 	chmod +x $(GOBIN)/dsync
 
 install:
 	go install github.com/asolopovas/dsync@latest
 
 test:
-	 go run ./main.go -c ./dsync-config.json
+	 go run . -c ./dsync-config.json
 
 tag-push:
 	$(eval VERSION=$(shell cat version))
