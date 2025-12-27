@@ -1,70 +1,144 @@
 # Dsync
-Dsync is a Go-built tool that syncs files and databases between different environments, majorly catering to WordPress projects. It utilizes `rsync` for file sync, MySQL's `mysqldump` for database sync, and allows process customization via a JSON config file.
+
+Dsync is a command-line tool written in Go for synchronizing files and databases between local and remote environments. It is designed primarily for web development workflows (e.g., WordPress) but is flexible enough for other use cases. It uses `rsync` for file synchronization and `mysqldump`/`mariadb-dump` for database synchronization.
 
 ## Features
-- File and Database sync using `rsync` and MySQL's `mysqldump` respectively.
-- Process customization with a JSON config file.
-- Default config file generation.
+
+- **File Synchronization:** Efficient file syncing using `rsync`.
+- **Database Synchronization:** Supports MySQL and MariaDB. Automatically handles database dumps, transfers, and imports.
+- **Search and Replace:** Performs string replacements on the database dump during synchronization (useful for changing domain names).
+- **Reverse Sync:** Support for syncing from local to remote environments with automatic remote backups.
+- **Configuration:** Simple JSON configuration file.
+- **SSH Support:** Configurable SSH host and port.
 
 ## Prerequisites
-- Go 1.20 or later.
-- Access to both local and remote servers.
+
+- Go 1.20 or later (for building from source).
+- `rsync` installed on both local and remote machines.
+- `mysqldump` or `mariadb-dump` installed on both local and remote machines.
 - SSH access to the remote server.
 
 ## Installation
-Using `go install`:
-```
+
+### Using `go install`
+
+```bash
 go install github.com/asolopovas/dsync@latest
 ```
 
-Clone the repo and build the app:
-```
-git clone https://github.com/asolopovas/dsync.git go build -o $ABSOLUTE_PATH_TO_DSYNC main.go
-```
-Add it to your system path or copy executable `sudo cp dsync /usr/local/bin/`.
+### Building from Source
 
-## Usage
-Dsync operates on a config file (`dsync-config.json`). Generate a default config file using `-g` flag:
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/asolopovas/dsync.git
+   cd dsync
+   ```
+
+2. Build the binary:
+   ```bash
+   go build -o dsync main.go
+   ```
+
+3. Move the binary to a directory in your system PATH (e.g., `/usr/local/bin`):
+   ```bash
+   sudo mv dsync /usr/local/bin/
+   ```
+
+## Configuration
+
+Dsync requires a configuration file, typically named `dsync-config.json`. You can generate a default configuration file using the `-g` flag.
+
+```bash
 dsync -g
 ```
 
-Modify `dsync-config.json` as per your needs. The config file comprises:
+### Configuration File Structure
 
-- SSH Host details.
-- Remote and Local host settings.
-- File and Directory sync details.
-- Database replace rules for various environments.
-
-After configuring, sync files and database with:
-Version:
-
+```json
+{
+  "sshHost": "user@remote-host.com",
+  "port": "22",
+  "remote": {
+    "host": "remote-db-host",
+    "db": "remote_db_name"
+  },
+  "local": {
+    "host": "localhost",
+    "db": "local_db_name"
+  },
+  "dbReplace": [
+    {
+      "from": "http://remote-site.com",
+      "to": "http://local-site.test"
+    }
+  ],
+  "sync": [
+    {
+      "remote": "/var/www/html/wp-content/uploads/",
+      "local": "./wp-content/uploads/",
+      "exclude": [
+        "*.log",
+        "cache/"
+      ]
+    }
+  ]
+}
 ```
-dsync -v
-```
 
-Sync All:
-```
+- **sshHost**: The SSH connection string (user@host).
+- **port**: The SSH port (default is usually 22).
+- **remote/local**: Database connection settings for remote and local environments.
+- **dbReplace**: List of string replacements to apply to the database dump.
+- **sync**: List of file paths to synchronize. Supports exclude patterns.
+
+## Usage
+
+Run `dsync` from the directory containing your configuration file, or specify the path using the `-c` flag.
+
+### Common Commands
+
+**Sync everything (files and database) from remote to local:**
+```bash
 dsync -a
 ```
 
-Sync Files only:
-```
+**Sync only files:**
+```bash
 dsync -f
 ```
 
-Sync Database only:
-```
+**Sync only database:**
+```bash
 dsync -d
 ```
 
-For a custom config path use `-c` flag:
-```
-dsync -c "/path/to/your/config.json"
+**Reverse sync (Local to Remote):**
+Use the `-r` flag to sync from your local machine to the remote server.
+```bash
+dsync -a -r
 ```
 
-## Contributing
-Open issues, submit pull requests, and share feedback.
+**Dump database to file:**
+```bash
+dsync --dump
+```
+
+**Show version:**
+```bash
+dsync -v
+```
+
+### Flags
+
+- `-a`, `--all`: Sync both files and database.
+- `-f`, `--files`: Sync files only.
+- `-d`, `--db`: Sync database only.
+- `-r`, `--reverse`: Reverse sync (Local to Remote).
+- `--dump`: Dump database to a file without importing.
+- `-c`, `--config`: Specify a custom configuration file path (default: `dsync-config.json`).
+- `-g`, `--gen`: Generate a default configuration file.
+- `-v`, `--version`: Display version information.
 
 ## License
-MIT License.
+
+MIT License

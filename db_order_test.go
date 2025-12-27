@@ -7,14 +7,14 @@ import (
 func TestReverseReplacementOrder(t *testing.T) {
 	// User's config scenario
 	replacements := []DBReplace{
-		{From: "avianese.com", To: "avianese.test"},
-		{From: "https://avianese.test", To: "http://avianese.test"},
+		{From: "avianese.com", To: "example.test"},
+		{From: "https://example.test", To: "http://example.test"},
 	}
 
 	// Forward Sync (Remote -> Local)
-	// Expected: https://avianese.com -> http://avianese.test
+	// Expected: https://avianese.com -> http://example.test
 	inputForward := "Check https://avianese.com now"
-	expectedForward := "Check http://avianese.test now"
+	expectedForward := "Check http://example.test now"
 
 	// Current logic for forward
 	resForward := ApplyDBReplacements(inputForward, replacements)
@@ -23,8 +23,8 @@ func TestReverseReplacementOrder(t *testing.T) {
 	}
 
 	// Reverse Sync (Local -> Remote)
-	// Expected: http://avianese.test -> https://avianese.com
-	inputReverse := "Check http://avianese.test now"
+	// Expected: http://example.test -> https://avianese.com
+	inputReverse := "Check http://example.test now"
 	expectedReverse := "Check https://avianese.com now"
 
 	// Current logic for reverse (as implemented in db.go currently)
