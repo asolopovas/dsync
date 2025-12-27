@@ -7,11 +7,11 @@ import (
 
 func TestReproUserIssue(t *testing.T) {
 	// Case 1: User's messy config
-	// "https:\\/\\/avianese.com" -> "https:\/\/avianese.com" in memory
+	// "https:\\/\\/example.com" -> "https:\/\/example.com" in memory
 	jsonConfig := `[
         {
-            "from": "https:\\/\\/avianese.com",
-            "to": "http:\\/\\/avianese.test"
+            "from": "https:\\/\\/example.com",
+            "to": "http:\\/\\/example.test"
         }
     ]`
 
@@ -20,8 +20,8 @@ func TestReproUserIssue(t *testing.T) {
 		t.Fatalf("Failed to unmarshal: %v", err)
 	}
 
-	dumpContent := `Some content "https:\\/\\/avianese.com" end`
-	expected := `Some content "http:\\/\\/avianese.test" end`
+	dumpContent := `Some content "https:\\/\\/example.com" end`
+	expected := `Some content "http:\\/\\/example.test" end`
 
 	result := ApplyDBReplacements(dumpContent, replacements)
 
@@ -31,7 +31,7 @@ func TestReproUserIssue(t *testing.T) {
 
 	// Case 2: Clean config (The ideal way)
 	cleanReplacements := []DBReplace{
-		{From: "https://avianese.com", To: "http://avianese.test"},
+		{From: "https://example.com", To: "http://example.test"},
 	}
 
 	resultClean := ApplyDBReplacements(dumpContent, cleanReplacements)
