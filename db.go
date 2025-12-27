@@ -130,6 +130,22 @@ func ApplyDBReplacements(sql string, replacements []DBReplace) string {
 	for _, item := range replacements {
 		fmt.Printf("%-*s -> %s\n", maxLen, item.From, item.To)
 		sql = strings.ReplaceAll(sql, item.From, item.To)
+
+		// Handle JSON-escaped slashes (e.g. "http:\/\/")
+		// Common in JSON embedded in HTML or PHP serialized data
+		fromJSON := strings.ReplaceAll(item.From, "/", `\/`)
+		toJSON := strings.ReplaceAll(item.To, "/", `\/`)
+		if fromJSON != item.From {
+			sql = strings.ReplaceAll(sql, fromJSON, toJSON)
+		}
+
+		// Handle Double-escaped slashes (e.g. "http:\\/\\/")
+		// Common in SQL dumps of JSON data where backslashes are escaped
+		fromDouble := strings.ReplaceAll(item.From, "/", `\\/`)
+		toDouble := strings.ReplaceAll(item.To, "/", `\\/`)
+		if fromDouble != item.From {
+			sql = strings.ReplaceAll(sql, fromDouble, toDouble)
+		}
 	}
 	return sql
 }
