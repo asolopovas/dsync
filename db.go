@@ -69,7 +69,9 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 	// 2. Apply replacements (Reversed)
 	fmt.Println("Applying replacements (Reverse)...")
 	var reversedReplacements []DBReplace
-	for _, r := range cfg.DBReplace {
+	// Iterate backwards to ensure correct order of operations (e.g. protocol replacement before domain replacement)
+	for i := len(cfg.DBReplace) - 1; i >= 0; i-- {
+		r := cfg.DBReplace[i]
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
 	sqlDump = ApplyDBReplacements(sqlDump, reversedReplacements)
