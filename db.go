@@ -275,21 +275,34 @@ func getComposeFilePath() string {
 
 func ApplyDBReplacements(sql string, replacements []DBReplace) string {
 	for _, item := range replacements {
+		// Build all possible escape variations of forward slashes
+		// Each variation adds more backslash escaping to handle different contexts:
+		// - Level 0: No escaping (normal URLs)
+		// - Level 1: JSON escaping (\/ instead of /)
+		// - Level 2: Double escaping (\\/ instead of /) - for JSON within SQL strings
+		// - Level 3: Triple escaping (\\\/ instead of /) - for nested contexts
+		// - Level 4: Quadruple escaping (\\\\/ instead of /) - for deeply nested contexts
+		// - Level 5: Quintuple escaping (\\\\\/ instead of /) - extreme cases
+		variations := []struct {
+			from string
+			to   string
+		}{
+			{strings.ReplaceAll(item.From, "/", `\/`), strings.ReplaceAll(item.To, "/", `\/`)},
+			{strings.ReplaceAll(item.From, "/", `\\/`), strings.ReplaceAll(item.To, "/", `\\/`)},
+			{strings.ReplaceAll(item.From, "/", `\\\/`), strings.ReplaceAll(item.To, "/", `\\\/`)},
+			{strings.ReplaceAll(item.From, "/", `\\\\/`), strings.ReplaceAll(item.To, "/", `\\\\/`)},
+			{strings.ReplaceAll(item.From, "/", `\\\\\/`), strings.ReplaceAll(item.To, "/", `\\\\\/`)},
+		}
+
+		// Apply all escape variations
+		for _, v := range variations {
+			if v.from != item.From {
+				sql = strings.ReplaceAll(sql, v.from, v.to)
+			}
+		}
+
+		// Apply the original (unescaped) replacement
 		sql = strings.ReplaceAll(sql, item.From, item.To)
-
-		// Handle JSON-escaped slashes (e.g. "http:\/\/")
-		fromJSON := strings.ReplaceAll(item.From, "/", `\/`)
-		toJSON := strings.ReplaceAll(item.To, "/", `\/`)
-		if fromJSON != item.From {
-			sql = strings.ReplaceAll(sql, fromJSON, toJSON)
-		}
-
-		// Handle Double-escaped slashes (e.g. "http:\\/\\/")
-		fromDouble := strings.ReplaceAll(item.From, "/", `\\/`)
-		toDouble := strings.ReplaceAll(item.To, "/", `\\/`)
-		if fromDouble != item.From {
-			sql = strings.ReplaceAll(sql, fromDouble, toDouble)
-		}
 	}
 	return sql
 }

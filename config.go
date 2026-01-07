@@ -67,8 +67,8 @@ func GenerateConfig(path string) error {
 			},
 		},
 		DBReplace: []DBReplace{
-			{From: "host.com", To: "host.test"},
-			{From: "/home/host/public_html", To: "/home/user/www/project"},
+			{From: "https://some.domain.com", To: "http://local.test"},
+			{From: "/home/remote/public_html", To: "/home/user/www/project"},
 		},
 	}
 
