@@ -17,8 +17,12 @@ These rules adapt harness-engineering practice to this repository.
 2. Open only the docs relevant to the task.
 3. Inspect the code before editing.
 4. Make the smallest coherent change.
-5. Run the matching checks from [`verification.md`](verification.md).
+5. Run the matching `just` task from [`verification.md`](verification.md).
 6. Update docs or plans when behaviour, workflow, or known debt changes.
+
+## Task-first command rule
+
+Agents must use `just` tasks for repository workflows. Do not run raw `go test`, `go vet`, release, build, benchmark, or integration commands when a `just` task exists. If a workflow needs a raw command more than once, add or update a `justfile` task first, then document and run that task. Raw commands are acceptable only for read-only inspection (`git status`, `rg`, `ls`) or one-off diagnostics that do not belong in the project workflow.
 
 ## Taste invariants
 

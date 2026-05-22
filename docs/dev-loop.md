@@ -14,25 +14,24 @@ Use Go 1.23 or newer unless `go.mod` changes.
 ## Common commands
 
 ```bash
-go run .                 # run CLI from source
-just start               # justfile alias for go run .
-go test ./...            # full unit suite
-go test -run TestName    # focused test
-go vet ./...             # static checks
-go build -o ./dist/dsync .
+just start               # run CLI from source
+just run -- --help       # run CLI with arbitrary args
+just test                # full unit suite
+just test-one TestName   # focused test
+just vet                 # static checks
 just build               # build and chmod ./dist/dsync
 just check               # fmt, vet, tests, temp compile check
 just release             # checked dev release archives into releases/dev/
 just release --bump patch|minor|major  # stable Go-module release tag flow
-go test -bench=Benchmark -benchmem ./...
-DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1
+just bench               # benchmarks
+just integration-test    # Docker-backed serialized DB import test
 ```
 
 ## Release flow
 
 `just release` runs the release gate and builds archives plus `checksums.txt` into `releases/dev/`.
 
-Stable releases use Go module tags; pushing `vX.Y.Z` is the registry step that makes `go install github.com/asolopovas/dsync@latest` resolve the new version.
+Stable releases use Go module tags; pushing `vX.Y.Z` is the registry step that makes `go install github.com/asolopovas/dsync@latest` resolve the new version. The release task is the release procedure: it must run the preflight, version update, `just check`, archive build, release commit, semver tag, rolling `latest` tag, and push. Do not manually run those steps as separate commands when releasing.
 
 ```bash
 just release --stable          # patch bump, commit, tag, push

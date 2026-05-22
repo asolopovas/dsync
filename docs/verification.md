@@ -1,29 +1,26 @@
 # Verification
 
-Use the smallest reliable check while iterating, then run the handoff gate before reporting done.
+Use the smallest reliable `just` task while iterating, then run the handoff gate before reporting done. If a task exists, run the task instead of manually running the underlying commands.
 
 ## Fast checks
 
 ```bash
-go test -run TestApplyDBReplacements
-go test -run TestTransformSQLDump
-go test -run TestSyncDB
-go test -run TestEnsureTrailingSlash
+just test-one TestApplyDBReplacements
+just test-one TestTransformSQLDump
+just test-one TestSyncDB
+just test-one TestEnsureTrailingSlash
 ```
 
 ## Handoff gate
 
 ```bash
-gofmt -w *.go
-go vet ./...
-go test ./...
-go build -trimpath -ldflags="-s -w" -o ./dist/dsync .
-DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1  # when Docker is available
-go run . --help
-go run . --version
+just check
+just integration-test  # when Docker is available
+just help
+just version
 ```
 
-`gofmt` should be a no-op unless Go files changed. The build writes `dist/dsync`, which is a generated binary.
+`just check` runs formatting, vet, tests, and a temporary compile check without dirtying `dist/`.
 
 ## Manual checks
 
@@ -35,7 +32,7 @@ Run manual checks only when relevant and safe.
 | Forward DB sync | Use a disposable local DB and run `go run . -c <safe config> -d`. |
 | Reverse DB sync | Confirm the target is disposable or backed up, then run `go run . -c <safe config> -d -r`. |
 | Dump output | Run `go run . -c <safe config> -d --dump` and inspect `db.sql` or `db_reverse.sql`. |
-| Release packaging | Run `just release` and inspect `releases/dev/checksums.txt`. For stable flow, dry-run first with `just release --dry-run --bump patch`. |
+| Release packaging | Run `just release` and inspect `releases/dev/checksums.txt`. For stable flow, use only `just release --bump patch|minor|major`; the task owns check, build, commit, tags, and push. Use `just release --dry-run --bump patch` only to preview. |
 | Serialized DB import | Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` with Docker available. |
 | Completion command | Run `go run . completion` and inspect `~/.config/fish/completions/dsync.fish`. |
 

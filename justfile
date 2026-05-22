@@ -19,6 +19,15 @@ setup:
 start:
     go run .
 
+run *args:
+    go run . {{args}}
+
+help:
+    go run . --help
+
+version:
+    go run . --version
+
 # ─── quality ──────────────────────────────────────────────────────────────────
 
 fmt:
@@ -29,6 +38,15 @@ vet:
 
 test:
     go test ./...
+
+test-one name:
+    go test -run {{name}}
+
+integration-test:
+    DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1
+
+bench:
+    go test -bench=Benchmark -benchmem ./...
 
 # Pre-release gate. Compiles to a temp binary so checks do not dirty dist/.
 check: fmt vet test build-check
@@ -116,6 +134,7 @@ _release-help:
     @echo '  just release --stable'
     @echo '  just release --bump patch|minor|major|X.Y.Z'
     @echo '  just release --bump minor --no-push'
+    @echo 'stable release runs check, build, version commit, semver tag, latest tag, and push'
 
 [private]
 _release-build version output_dir:

@@ -35,12 +35,13 @@ DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1
 just tag-push            # tag from ./version and force-update latest
 ```
 
-Run `go test ./...` before handing off code changes. Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` when DB streaming/serialization import behaviour changes and Docker is available. Run manual rsync, ssh, Docker, or database checks only when the task touches those behaviours and a safe target is available.
+Run `just check` before handing off code changes. Run `just integration-test` when DB streaming/serialization import behaviour changes and Docker is available. Run manual rsync, ssh, Docker, or database checks only when the task touches those behaviours and a safe target is available.
 
 ## Non-negotiable invariants
 
 - Prefer clear names and direct control flow. Eschew obfuscation; elucidate intent.
 - Repository-local docs are the system of record; if feedback matters later, capture it in `docs/` or a test.
+- Task-first workflow is mandatory: when a `just` task exists, run that task instead of manually running its underlying commands.
 - Treat `dsync-config.json` and all real configs as local secrets. `.gitignore` excludes JSON and `configs/**`.
 - Keep CLI wiring in `root.go`; keep config parsing in `config.go`; keep file sync in `sync.go`; keep DB sync and replacement logic in `db.go` until a deliberate refactor moves it.
 - Forward DB sync is remote dump -> replacements in listed order -> local import.
@@ -50,3 +51,4 @@ Run `go test ./...` before handing off code changes. Run `DSYNC_INTEGRATION=1 go
 - Preserve context-aware external commands and return stderr/stdout in errors where useful.
 - `SyncPath` endpoints are directory semantics; `ensureTrailingSlash` is part of the rsync contract.
 - Do not commit generated dumps, private configs, or local database directories.
+- Stable releases must be done with `just release --bump ...`; do not manually run separate check, build, commit, tag, or push commands for a release.
