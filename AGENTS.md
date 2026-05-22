@@ -25,6 +25,7 @@ just check               # fmt, vet, tests, temp compile check
 just check test-race     # selected check job
 just check integration-test  # Docker-backed DB import test
 just build               # build ./dist/dsync
+just install             # system install current default-branch dev build
 just release             # checked dev archives into releases/dev/
 just release --bump patch|minor|major  # stable release flow
 ```

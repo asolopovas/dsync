@@ -10,6 +10,7 @@ just vet
 just check
 just bench
 just integration-test
+just install
 
 User commands:
 dsync --gen

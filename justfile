@@ -170,9 +170,24 @@ release *args:
 clean:
     rm -rf {{_dist_dir}} {{_tmp_dir}} {{_release_dir}} releases/v*
 
-[private]
-install:
-    go install -trimpath -ldflags="-s -w" .
+# Install the current default-branch dev build to /usr/local/bin/dsync.
+install dest="/usr/local/bin/dsync":
+    @dest="{{dest}}"; dir="$(dirname "${dest}")"; \
+    default_branch="$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}' || true)"; \
+    current_branch="$(git branch --show-current 2>/dev/null || true)"; \
+    if [[ -n "${default_branch}" && -n "${current_branch}" && "${current_branch}" != "${default_branch}" ]]; then \
+        echo "install: expected default branch ${default_branch}, currently on ${current_branch}" >&2; \
+        exit 1; \
+    fi; \
+    tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT; \
+    go build -trimpath -ldflags="-s -w" -o "${tmp}/{{_bin}}" .; \
+    if [[ -w "${dir}" ]]; then \
+        install -m 0755 "${tmp}/{{_bin}}" "${dest}"; \
+    else \
+        sudo install -m 0755 "${tmp}/{{_bin}}" "${dest}"; \
+    fi; \
+    installed_version="$("${dest}" --version)"; \
+    echo "installed ${installed_version} to ${dest}"
 
 [private]
 _go-build output:
