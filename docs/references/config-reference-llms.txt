@@ -1,0 +1,19 @@
+Dsync config reference for agents
+
+Default path: dsync-config.json. Override with -c/--config.
+
+Fields:
+- sshHost: SSH target used by ssh and rsync, usually user@host.
+- port: SSH port string.
+- remote.db: remote database name used by mysqldump/mysql.
+- local.db: local database name used inside Docker Compose mariadb service.
+- remote.host/local.host: present in structs, not used by current commands.
+- dbReplaceEngine: go-serialized, raw, none. Empty defaults based on WordPress-looking sync paths.
+- validateSerialized: re-parse transformed serialized PHP values and fail if invalid.
+- skipColumns: columns skipped by column-aware engines; guid is always skipped by default.
+- dbReplace: ordered {from,to} replacement list.
+- sync[].remote/local: directory endpoints; trailing slash normalization is required.
+- sync[].exclude: rsync --exclude patterns.
+
+Forward replacements: from -> to in listed order.
+Reverse replacements: to -> from in reverse list order.

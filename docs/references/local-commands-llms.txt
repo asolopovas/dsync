@@ -1,0 +1,31 @@
+Dsync command reference for agents
+
+Development:
+just setup
+just start
+just run -- --help
+just test
+just test-one TestName
+just vet
+just check
+just bench
+just integration-test
+
+User commands:
+dsync --gen
+dsync -c ./configs/site.json -a
+dsync -c ./configs/site.json -f
+dsync -c ./configs/site.json -d
+dsync -c ./configs/site.json -a -r
+dsync -c ./configs/site.json -d -r
+dsync -c ./configs/site.json -d --dump
+dsync -c ./configs/site.json -d -r --dump
+
+Release:
+just release
+just release --bump patch
+just release --bump minor
+just release --bump major
+just release --dry-run --bump patch
+
+Rule: if a just task exists, use it instead of the raw underlying command.
