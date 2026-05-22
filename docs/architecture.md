@@ -14,7 +14,7 @@ Dsync is a single-package Go CLI. It syncs directory trees with `rsync` and stre
 | `db_transform.go` | SQL dump transformation, raw replacements, column-aware INSERT parsing, PHP serialization-safe replacement. |
 | `*_test.go` | Unit coverage for replacement behaviour, DB orchestration order, and path helpers. |
 | `version` | Embedded CLI version string. |
-| `Makefile` | Local build, install, and release tag helpers. |
+| `justfile` | Local build, verification, and release helpers. |
 
 ## Runtime dependencies
 

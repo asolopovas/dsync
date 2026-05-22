@@ -22,17 +22,17 @@ This file is the agent table of contents, not the project manual. Keep durable k
 
 ```bash
 go run .                 # run dsync from the current directory
-make start               # same local run path as go run .
+just start               # same local run path as go run .
 go test ./...            # unit test suite
 go test -run TestName    # focused test while iterating
 go build -o ./dist/dsync .
-make build               # build ./dist/dsync and chmod it executable
+just build               # build ./dist/dsync and chmod it executable
 just check               # fmt, vet, tests, temp compile check
-just release             # cross-compile archives into releases/dev/
+just release             # checked dev release archives into releases/dev/
+just release --bump patch|minor|major  # stable Go-module release tag flow
 go test -bench=Benchmark -benchmem ./...
 DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1
-make install-local       # build to $GOBIN/dsync
-make tag-push            # tag from ./version and force-update latest
+just tag-push            # tag from ./version and force-update latest
 ```
 
 Run `go test ./...` before handing off code changes. Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` when DB streaming/serialization import behaviour changes and Docker is available. Run manual rsync, ssh, Docker, or database checks only when the task touches those behaviours and a safe target is available.

@@ -35,7 +35,7 @@ Run manual checks only when relevant and safe.
 | Forward DB sync | Use a disposable local DB and run `go run . -c <safe config> -d`. |
 | Reverse DB sync | Confirm the target is disposable or backed up, then run `go run . -c <safe config> -d -r`. |
 | Dump output | Run `go run . -c <safe config> -d --dump` and inspect `db.sql` or `db_reverse.sql`. |
-| Release packaging | Run `just release` or `./scripts/build-release.sh` and inspect `releases/dev/checksums.txt`. |
+| Release packaging | Run `just release` and inspect `releases/dev/checksums.txt`. For stable flow, dry-run first with `just release --dry-run --bump patch`. |
 | Serialized DB import | Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` with Docker available. |
 | Completion command | Run `go run . completion` and inspect `~/.config/fish/completions/dsync.fish`. |
 

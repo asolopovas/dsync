@@ -147,13 +147,21 @@ dsync -v
 
 ## Release builds
 
-If you use `just`, build Go-style release archives with:
+Build checked dev archives with:
 
 ```bash
 just release
 ```
 
-Artifacts and `checksums.txt` are written to `releases/dev/`.
+Artifacts and `checksums.txt` are written to `releases/dev/`. Stable Go-module releases bump `version`, create/push the semver tag, and update the rolling `latest` tag:
+
+```bash
+just release --bump patch
+just release --bump minor
+just release --bump major
+```
+
+Use `--no-push` for local commit/tags only or `just release --dry-run --bump minor` to preview.
 
 ## Benchmark snapshot
 
