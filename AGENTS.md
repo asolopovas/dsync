@@ -20,19 +20,13 @@ This file is a map, not a manual. Repository-local docs are the system of record
 ## Commands
 
 ```bash
-just start               # run CLI from source
-just run --help          # run CLI with arbitrary args
-just test                # unit suite
-just test-one TestName   # focused test
-just test-race           # race-detector suite
-just coverage            # write tmp/coverage.out and print coverage
+just run --help          # run CLI from source with arbitrary args
 just check               # fmt, vet, tests, temp compile check
+just check test-race     # selected check job
+just check integration-test  # Docker-backed DB import test
 just build               # build ./dist/dsync
-just run-built --help    # rebuild and run ./dist/dsync with args
 just release             # checked dev archives into releases/dev/
 just release --bump patch|minor|major  # stable release flow
-just bench               # benchmarks
-just integration-test    # Docker-backed DB import test
 ```
 
 Use `just` tasks for project workflows; `.vscode/tasks.json` mirrors the common tasks for editor users. Run `just check` before handoff for code changes. Run `just integration-test` when DB import/serialization behavior changes and Docker is available.

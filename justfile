@@ -10,17 +10,15 @@ _test_packages := "./..."
 
 export CGO_ENABLED := env_var_or_default("CGO_ENABLED", "0")
 
-# Show available recipes.
 default:
     @just --list --unsorted
 
 # ─── setup ────────────────────────────────────────────────────────────────────
 
-# Download Go module dependencies.
 setup:
     go mod download
 
-# Normalize go.mod/go.sum.
+[private]
 tidy:
     go mod tidy
 
@@ -30,66 +28,79 @@ tidy:
 run *args:
     go run . {{args}}
 
-# Backward-compatible alias for `run`.
+[private]
 start *args:
     @just run {{args}}
 
-# Print CLI help.
+[private]
 help:
     go run . --help
 
-# Print CLI version.
+[private]
 version:
     go run . --version
 
-# Run the built binary, rebuilding it first.
+[private]
 run-built *args: build
     ./{{_dist_bin}} {{args}}
 
 # ─── quality ──────────────────────────────────────────────────────────────────
 
-# Format tracked Go files.
+# Pre-release gate: all jobs by default, or selected jobs by name.
+check *jobs:
+    @if [[ -z "{{jobs}}" ]]; then \
+        just fmt; \
+        just vet; \
+        just test; \
+        just build-check; \
+    else \
+        for job in {{jobs}}; do \
+            case "${job}" in \
+                fmt|vet|test|test-one|test-race|integration-test|bench|coverage|build|build-check) just "${job}" ;; \
+                *) echo "check: unknown job: ${job}" >&2; echo 'known jobs: fmt vet test test-race integration-test bench coverage build' >&2; exit 2 ;; \
+            esac; \
+        done; \
+    fi
+
+[private]
 fmt:
     gofmt -w $(git ls-files '*.go')
 
-# Run go vet.
+[private]
 vet:
     go vet {{_test_packages}}
 
-# Run the unit test suite. Example: `just test -run TestSync`.
+[private]
 test *args:
     go test {{_test_packages}} {{args}}
 
-# Run tests matching a regex, e.g. `just test-one TestSync`.
+[private]
 test-one pattern *args:
     go test {{_test_packages}} -run '{{pattern}}' {{args}}
 
-# Run tests with the race detector.
+[private]
 test-race *args:
     go test -race {{_test_packages}} {{args}}
 
-# Run the Docker-backed DB import integration test.
+[private]
 integration-test *args:
     DSYNC_INTEGRATION=1 go test {{_test_packages}} -run TestWordPressFixtureImportsIntoMariaDB -count=1 {{args}}
 
-# Run benchmarks. Override pattern with `just bench BenchmarkName`.
+[private]
 bench pattern="Benchmark" *args:
     go test {{_test_packages}} -bench='{{pattern}}' -benchmem {{args}}
 
-# Write a coverage profile to tmp/coverage.out and print function coverage.
+[private]
 coverage:
     mkdir -p {{_tmp_dir}}
     go test {{_test_packages}} -coverprofile={{_tmp_dir}}/coverage.out
     go tool cover -func={{_tmp_dir}}/coverage.out
 
-# Open an HTML coverage report in the default browser.
+[private]
 coverage-html: coverage
     go tool cover -html={{_tmp_dir}}/coverage.out
 
-# Pre-release gate. Compiles to a temp binary so checks do not dirty dist/.
-check: fmt vet test build-check
-
-# CI-friendly alias for the same local gate.
+[private]
 ci: check
 
 [private]
@@ -98,23 +109,9 @@ build-check:
 
 # ─── build / release ──────────────────────────────────────────────────────────
 
-# Remove generated build, coverage, and release artifacts.
-clean:
-    rm -rf {{_dist_dir}} {{_tmp_dir}} {{_release_dir}} releases/v*
-
 # Build ./dist/dsync.
 build:
     @just _go-build "{{_dist_bin}}"
-
-# Install dsync into GOPATH/bin or GOBIN.
-install:
-    go install -trimpath -ldflags="-s -w" .
-
-[private]
-_go-build output:
-    mkdir -p "$(dirname "{{output}}")"
-    go build -trimpath -ldflags="-s -w" -o "{{output}}" .
-    chmod +x "{{output}}"
 
 # Release flow: dev archives by default; --stable/--bump runs Go-module tag flow.
 release *args:
@@ -170,6 +167,20 @@ release *args:
     echo "release: stable $version ready"
 
 [private]
+clean:
+    rm -rf {{_dist_dir}} {{_tmp_dir}} {{_release_dir}} releases/v*
+
+[private]
+install:
+    go install -trimpath -ldflags="-s -w" .
+
+[private]
+_go-build output:
+    mkdir -p "$(dirname "{{output}}")"
+    go build -trimpath -ldflags="-s -w" -o "{{output}}" .
+    chmod +x "{{output}}"
+
+[private]
 _release-help:
     @echo 'usage:'
     @echo '  just release'
@@ -201,19 +212,19 @@ _release-target goos goarch version output_dir:
     (cd "{{output_dir}}" && tar -czf "${target}.tar.gz" "${target}/{{_bin}}"); \
     rm -rf "${work_dir}"
 
-# Stable patch release shortcut.
+[private]
 release-patch *args:
     @just release --bump patch {{args}}
 
-# Stable minor release shortcut.
+[private]
 release-minor *args:
     @just release --bump minor {{args}}
 
-# Stable major release shortcut.
+[private]
 release-major *args:
     @just release --bump major {{args}}
 
-# Backward-compatible tag flow. Prefer `just release --bump patch|minor|major`.
+[private]
 tag-push:
     @version="$(cat version)"; \
     git tag "${version}"; \
