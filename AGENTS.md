@@ -27,11 +27,15 @@ go test ./...            # unit test suite
 go test -run TestName    # focused test while iterating
 go build -o ./dist/dsync .
 make build               # build ./dist/dsync and chmod it executable
+just check               # fmt, vet, tests, temp compile check
+just release             # cross-compile archives into releases/dev/
+go test -bench=Benchmark -benchmem ./...
+DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1
 make install-local       # build to $GOBIN/dsync
 make tag-push            # tag from ./version and force-update latest
 ```
 
-Run `go test ./...` before handing off code changes. Run manual rsync, ssh, Docker, or database checks only when the task touches those behaviours and a safe target is available.
+Run `go test ./...` before handing off code changes. Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` when DB streaming/serialization import behaviour changes and Docker is available. Run manual rsync, ssh, Docker, or database checks only when the task touches those behaviours and a safe target is available.
 
 ## Non-negotiable invariants
 

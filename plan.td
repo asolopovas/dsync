@@ -1,4 +1,4 @@
-# DB replacement engine plan
+# Dsync Refactor Plan
 
 ## Status
 
@@ -8,14 +8,6 @@ Completed for the Go-only replacement path. Dsync now uses one selected replacem
 
 Refactor Dsync so WordPress database sync is fast, serialization-safe, and does not require WP-CLI by default.
 
-## Constraints
-
-- Preserve backward compatibility for existing configs.
-- Keep reverse sync safe: backup remote before writing remote.
-- Do not require WP-CLI for the default safe path.
-- Keep raw replacement available for simple non-WordPress use cases.
-- Add tests before replacing current behaviour.
-
 ## Tasks
 
 - [x] Add DB replacement engine config
@@ -24,11 +16,13 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
   - [x] Default to `go-serialized` for WordPress-style configs.
   - [x] Add `validateSerialized` boolean config option.
   - [x] Do not add a fallback engine; Dsync uses exactly the selected engine.
+
 - [x] Refactor DB sync to support streaming
   - [x] Replace full SQL string dump/import flow with `io.Reader` / `io.Writer` pipeline.
   - [x] Stream remote `mysqldump` stdout through transformer into local MySQL stdin.
   - [x] Stream local dump through transformer into remote MySQL stdin for reverse sync.
   - [x] Keep dump-to-file support without forcing full dump into memory by teeing the transformed stream.
+
 - [x] Improve dump command flags
   - [x] Add `--single-transaction`.
   - [x] Add `--quick`.
@@ -36,6 +30,7 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
   - [x] Add `--complete-insert` so column names are available.
   - [x] Add `--default-character-set=utf8mb4`.
   - [x] Verify import compatibility with Docker `mariadb:lts` integration coverage. Real remote compatibility remains an operational preflight because it depends on the target host.
+
 - [x] Build SQL stream transformer
   - [x] Pass through non-INSERT SQL unchanged.
   - [x] Detect `INSERT INTO ... VALUES ...;` statements.
@@ -45,42 +40,50 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
   - [x] Correctly handle quoted strings, escaped quotes, backslashes, NULL, numbers, and hex values.
   - [x] Reconstruct transformed INSERT statements.
   - [x] Add tests for multiline INSERT statements.
+
 - [x] Add column-aware replacement rules
   - [x] Skip `guid` columns by default.
   - [x] Support configurable `skipColumns`.
   - [x] Defer `includeTables` / `skipTables`; not needed for the current engine.
   - [x] Ensure replacement still works when column list is unavailable and document that column skipping requires column names.
+
 - [x] Add Go PHP serialization support
   - [x] Evaluated library options and chose an in-repo parser to preserve object payloads without adding a dependency.
   - [x] Implement `isSerializedPHP(value string) bool`.
   - [x] Implement unserialize -> recursive replace -> serialize.
   - [x] Preserve PHP string byte lengths correctly.
   - [x] Add fixtures/tests for arrays, objects, bools, nulls, ints, floats, and UTF-8 strings.
+
 - [x] Support nested serialized strings
   - [x] If a string value inside serialized data is itself serialized, process it recursively.
   - [x] Replace inside string keys as well as string values.
   - [x] Add recursion depth limit to avoid pathological data.
   - [x] Add tests for nested serialized arrays and plugin-style option values.
+
 - [x] Handle SQL escaping safely
   - [x] Implement SQL string unescape for mysqldump output.
   - [x] Implement SQL string escape for re-emitting values.
   - [x] Cover `\'`, `\\`, `\n`, `\r`, `\t`, `\0`, and slash-escaped URL values.
   - [x] Add WordPress-like option/meta fixture coverage.
+
 - [x] Add serialized validation without WP-CLI
   - [x] Detect values that look serialized but fail unserialization during stream transformation.
   - [x] Report table, row, and column for transformation failures.
   - [x] Make validation optional via `validateSerialized`.
   - [x] Fail sync when transformed serialized values are invalid.
   - [x] Verify transformed values import into MariaDB in the Docker-backed integration test.
+
 - [x] Do not implement WP-CLI replacement
   - [x] Use the Go serialized engine as the WordPress-safe method.
   - [x] Do not implement fallback; users select exactly one engine.
+
 - [x] Add benchmarks
   - [x] Benchmark raw replacement.
   - [x] Benchmark raw stream replacement.
   - [x] Benchmark Go serialized stream replacement.
   - [x] Benchmark memory usage on large dumps with `b.ReportAllocs`.
   - [x] Document benchmark snapshot in README.
+
 - [x] Add integration tests
   - [x] Create small WordPress-like SQL dump fixture.
   - [x] Include serialized options with changing string lengths.
@@ -88,29 +91,16 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
   - [x] Include JSON, escaped URLs, and nested serialized data.
   - [x] Verify transformed SQL imports successfully into Docker `mariadb:lts` when `DSYNC_INTEGRATION=1`.
   - [x] Verify no broken serialized values after import.
+
 - [x] Update docs
   - [x] Document replacement engines and tradeoffs.
   - [x] Document recommended WordPress config.
   - [x] Document that Dsync does not fallback between replacement engines.
   - [x] Document validation behavior.
   - [x] Document release commands and benchmark snapshot.
+
 - [x] Migration cleanup
   - [x] Keep backward compatibility for existing configs by defaulting empty `dbReplaceEngine` from sync paths.
   - [x] Warn when using unsafe `raw` replacement with likely WordPress paths.
   - [x] Add clear error messages for parser failures.
   - [x] Ensure reverse sync uses the same safe engine with reversed replacements.
-
-## Verification plan
-
-- Unit tests for each parser and transformer layer.
-- Fixture for WordPress-like SQL with serialized PHP, JSON, escaped URLs, nested values, and `guid` rows.
-- Docker-backed MariaDB import test gated by `DSYNC_INTEGRATION=1`.
-- Reverse-sync tests that prove replacement inversion and backup-before-write order.
-- Benchmarks for raw replacement, raw streaming, Go serialized streaming, and large dump allocations.
-
-## Decision log
-
-- Raw replacement remains documented as a compatibility mode.
-- The WordPress-safe method is the Go serialized streaming engine.
-- Dsync does not fall back between replacement engines; users select exactly one engine.
-- The PHP serialization support is in-repo to avoid reshaping unknown WordPress objects through generic Go types.

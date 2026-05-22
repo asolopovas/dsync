@@ -6,7 +6,7 @@ Dsync is a command-line tool written in Go for synchronizing files and databases
 
 - **File Synchronization:** Efficient file syncing using `rsync`.
 - **Database Synchronization:** Supports MySQL and MariaDB. Automatically handles database dumps, transfers, and imports.
-- **Search and Replace:** Performs string replacements on the database dump during synchronization (useful for changing domain names).
+- **Search and Replace:** Streams replacements through the database dump, including a Go engine that preserves PHP serialized string lengths for WordPress-style data.
 - **Reverse Sync:** Support for syncing from local to remote environments with automatic remote backups.
 - **Configuration:** Simple JSON configuration file.
 - **SSH Support:** Configurable SSH host and port.
@@ -66,6 +66,9 @@ dsync -g
     "host": "localhost",
     "db": "local_db_name"
   },
+  "dbReplaceEngine": "go-serialized",
+  "validateSerialized": true,
+  "skipColumns": ["guid"],
   "dbReplace": [
     {
       "from": "http://remote-site.com",
@@ -88,6 +91,9 @@ dsync -g
 - **sshHost**: The SSH connection string (user@host).
 - **port**: The SSH port (default is usually 22).
 - **remote/local**: Database connection settings for remote and local environments.
+- **dbReplaceEngine**: Replacement engine. Use `go-serialized` for WordPress, `raw` for simple dumps, or `none` to skip replacements.
+- **validateSerialized**: Validate transformed PHP serialized values while streaming.
+- **skipColumns**: Columns skipped by the column-aware engine; `guid` is skipped by default.
 - **dbReplace**: List of string replacements to apply to the database dump.
 - **sync**: List of file paths to synchronize. Supports exclude patterns.
 
@@ -138,6 +144,27 @@ dsync -v
 - `-c`, `--config`: Specify a custom configuration file path (default: `dsync-config.json`).
 - `-g`, `--gen`: Generate a default configuration file.
 - `-v`, `--version`: Display version information.
+
+## Release builds
+
+If you use `just`, build Go-style release archives with:
+
+```bash
+just release
+```
+
+Artifacts and `checksums.txt` are written to `releases/dev/`.
+
+## Benchmark snapshot
+
+Run benchmarks with `go test -bench=Benchmark -benchmem ./...`. On a Ryzen 7 5800X3D/Linux host:
+
+| Benchmark | Throughput | Allocations |
+| --- | ---: | ---: |
+| Raw string replacement | 357 MB/s | 148 KB/op |
+| Raw streaming transformer | 62 MB/s | 693 KB/op |
+| Go serialized transformer | 20 MB/s | 3.97 MB/op |
+| Large Go serialized transformer | 29 MB/s | 18.8 MB/op |
 
 ## License
 

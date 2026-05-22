@@ -6,6 +6,7 @@ Use the smallest reliable check while iterating, then run the handoff gate befor
 
 ```bash
 go test -run TestApplyDBReplacements
+go test -run TestTransformSQLDump
 go test -run TestSyncDB
 go test -run TestEnsureTrailingSlash
 ```
@@ -14,8 +15,10 @@ go test -run TestEnsureTrailingSlash
 
 ```bash
 gofmt -w *.go
+go vet ./...
 go test ./...
-go build -o ./dist/dsync .
+go build -trimpath -ldflags="-s -w" -o ./dist/dsync .
+DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1  # when Docker is available
 go run . --help
 go run . --version
 ```
@@ -32,6 +35,8 @@ Run manual checks only when relevant and safe.
 | Forward DB sync | Use a disposable local DB and run `go run . -c <safe config> -d`. |
 | Reverse DB sync | Confirm the target is disposable or backed up, then run `go run . -c <safe config> -d -r`. |
 | Dump output | Run `go run . -c <safe config> -d --dump` and inspect `db.sql` or `db_reverse.sql`. |
+| Release packaging | Run `just release` or `./scripts/build-release.sh` and inspect `releases/dev/checksums.txt`. |
+| Serialized DB import | Run `DSYNC_INTEGRATION=1 go test -run TestWordPressFixtureImportsIntoMariaDB -count=1` with Docker available. |
 | Completion command | Run `go run . completion` and inspect `~/.config/fish/completions/dsync.fish`. |
 
 ## Expected unit-test coverage
@@ -39,6 +44,7 @@ Run manual checks only when relevant and safe.
 - Replacement order and escaped slash variants.
 - Reverse replacement order.
 - DB orchestration calls and backup-before-write order.
+- SQL stream transformation for multiline INSERTs, column skipping, SQL escaping, PHP serialized values, and WordPress-like fixtures.
 - Path normalization for rsync directory semantics.
 
 ## Handoff notes

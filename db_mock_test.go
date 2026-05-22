@@ -2,36 +2,38 @@ package main
 
 import (
 	"context"
+	"io"
+	"strings"
 	"testing"
 )
 
 type MockDBProvider struct {
-	DumpRemoteFunc   func(ctx context.Context) (string, error)
-	DumpLocalFunc    func(ctx context.Context) (string, error)
-	WriteRemoteFunc  func(ctx context.Context, sql string) error
-	WriteLocalFunc   func(ctx context.Context, sql string) error
+	DumpRemoteFunc   func(ctx context.Context) (*DBDump, error)
+	DumpLocalFunc    func(ctx context.Context) (*DBDump, error)
+	WriteRemoteFunc  func(ctx context.Context, sql io.Reader) error
+	WriteLocalFunc   func(ctx context.Context, sql io.Reader) error
 	BackupRemoteFunc func(ctx context.Context) error
 
 	Calls []string
 }
 
-func (m *MockDBProvider) DumpRemote(ctx context.Context) (string, error) {
+func (m *MockDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
 	m.Calls = append(m.Calls, "DumpRemote")
 	if m.DumpRemoteFunc != nil {
 		return m.DumpRemoteFunc(ctx)
 	}
-	return "", nil
+	return stringDump(""), nil
 }
 
-func (m *MockDBProvider) DumpLocal(ctx context.Context) (string, error) {
+func (m *MockDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
 	m.Calls = append(m.Calls, "DumpLocal")
 	if m.DumpLocalFunc != nil {
 		return m.DumpLocalFunc(ctx)
 	}
-	return "", nil
+	return stringDump(""), nil
 }
 
-func (m *MockDBProvider) WriteRemote(ctx context.Context, sql string) error {
+func (m *MockDBProvider) WriteRemote(ctx context.Context, sql io.Reader) error {
 	m.Calls = append(m.Calls, "WriteRemote")
 	if m.WriteRemoteFunc != nil {
 		return m.WriteRemoteFunc(ctx, sql)
@@ -39,7 +41,7 @@ func (m *MockDBProvider) WriteRemote(ctx context.Context, sql string) error {
 	return nil
 }
 
-func (m *MockDBProvider) WriteLocal(ctx context.Context, sql string) error {
+func (m *MockDBProvider) WriteLocal(ctx context.Context, sql io.Reader) error {
 	m.Calls = append(m.Calls, "WriteLocal")
 	if m.WriteLocalFunc != nil {
 		return m.WriteLocalFunc(ctx, sql)
@@ -55,14 +57,33 @@ func (m *MockDBProvider) BackupRemote(ctx context.Context) error {
 	return nil
 }
 
+func stringDump(sql string) *DBDump {
+	return &DBDump{
+		Reader: io.NopCloser(strings.NewReader(sql)),
+		Wait: func() error {
+			return nil
+		},
+	}
+}
+
+func readAllForTest(t *testing.T, reader io.Reader) string {
+	t.Helper()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read sql: %v", err)
+	}
+	return string(data)
+}
+
 func TestSyncDB_Forward(t *testing.T) {
 	mock := &MockDBProvider{
-		DumpRemoteFunc: func(ctx context.Context) (string, error) {
-			return "INSERT INTO users VALUES ('remote');", nil
+		DumpRemoteFunc: func(ctx context.Context) (*DBDump, error) {
+			return stringDump("INSERT INTO users VALUES ('remote');"), nil
 		},
-		WriteLocalFunc: func(ctx context.Context, sql string) error {
-			if sql != "INSERT INTO users VALUES ('remote');" {
-				t.Errorf("Unexpected SQL: %s", sql)
+		WriteLocalFunc: func(ctx context.Context, sql io.Reader) error {
+			got := readAllForTest(t, sql)
+			if got != "INSERT INTO users VALUES ('remote');" {
+				t.Errorf("Unexpected SQL: %s", got)
 			}
 			return nil
 		},
@@ -86,15 +107,16 @@ func TestSyncDB_Forward(t *testing.T) {
 
 func TestSyncDB_Reverse(t *testing.T) {
 	mock := &MockDBProvider{
-		DumpLocalFunc: func(ctx context.Context) (string, error) {
-			return "INSERT INTO users VALUES ('local');", nil
+		DumpLocalFunc: func(ctx context.Context) (*DBDump, error) {
+			return stringDump("INSERT INTO users VALUES ('local');"), nil
 		},
 		BackupRemoteFunc: func(ctx context.Context) error {
 			return nil
 		},
-		WriteRemoteFunc: func(ctx context.Context, sql string) error {
-			if sql != "INSERT INTO users VALUES ('local');" {
-				t.Errorf("Unexpected SQL: %s", sql)
+		WriteRemoteFunc: func(ctx context.Context, sql io.Reader) error {
+			got := readAllForTest(t, sql)
+			if got != "INSERT INTO users VALUES ('local');" {
+				t.Errorf("Unexpected SQL: %s", got)
 			}
 			return nil
 		},

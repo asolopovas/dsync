@@ -22,7 +22,7 @@ DB only:
 dsync -c ./configs/site.json -d
 ```
 
-Forward DB flow copies the remote database into the local database after replacements.
+Forward DB flow streams the remote dump through the configured replacement engine into the local database. `--dump` tees the transformed stream to disk without requiring a second dump.
 
 ## Reverse sync: local to remote
 
@@ -31,7 +31,7 @@ dsync -c ./configs/site.json -a -r
 dsync -c ./configs/site.json -d -r
 ```
 
-Reverse DB flow writes to the remote database. It first creates a timestamped remote backup with `mysqldump -uroot <db> > <db>_backup_<timestamp>.sql`.
+Reverse DB flow streams the local dump through reversed replacements into the remote database. It first creates a timestamped remote backup with `mysqldump -uroot <db> > <db>_backup_<timestamp>.sql`.
 
 Before reverse sync, confirm:
 
@@ -65,6 +65,7 @@ Do not commit dump files. They may contain private data.
 | Path | Meaning | Commit? |
 | --- | --- | --- |
 | `dist/dsync` | Built CLI binary. | No. |
+| `releases/**` | Cross-compiled release archives and checksums. | No. |
 | `db.sql` | Forward dump output. | No. |
 | `db_reverse.sql` | Reverse dump output. | No. |
 | `dsync-config.json` | Local config, often secret. | No. |
@@ -77,3 +78,4 @@ Do not commit dump files. They may contain private data.
 - For file sync failures, verify ssh access, rsync installation, port, path existence, and excludes.
 - For local DB failures, verify Docker is running, the compose file path is right, and the service name is `mariadb`.
 - For remote DB failures, verify `mysqldump`/`mysql` availability and root access on the remote host.
+- For `go-serialized` replacement failures, inspect the reported row and column. Values that look serialized but use unsupported PHP serialization features should be fixed in the dump or synced with `dbReplaceEngine: "raw"` only if corruption risk is acceptable.

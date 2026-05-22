@@ -1,6 +1,10 @@
 configs/**
 *.json
 db/**
+db.sql
+db_reverse.sql
+dist/**
+releases/**
 .vscode
 __debug_bin
 

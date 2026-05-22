@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -12,11 +13,16 @@ import (
 	"github.com/pterm/pterm"
 )
 
+type DBDump struct {
+	Reader io.ReadCloser
+	Wait   func() error
+}
+
 type DBProvider interface {
-	DumpRemote(ctx context.Context) (string, error)
-	DumpLocal(ctx context.Context) (string, error)
-	WriteRemote(ctx context.Context, sql string) error
-	WriteLocal(ctx context.Context, sql string) error
+	DumpRemote(ctx context.Context) (*DBDump, error)
+	DumpLocal(ctx context.Context) (*DBDump, error)
+	WriteRemote(ctx context.Context, sql io.Reader) error
+	WriteLocal(ctx context.Context, sql io.Reader) error
 	BackupRemote(ctx context.Context) error
 }
 
@@ -29,42 +35,27 @@ func NewRealDBProvider(cfg *Config) *RealDBProvider {
 }
 
 func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, reverse bool) error {
+	warnUnsafeRawReplacement(cfg)
 	if reverse {
 		return syncDBReverse(ctx, provider, cfg, dumpDB)
 	}
 
 	pterm.DefaultSection.Println("Syncing Database (remote to local)")
 
-	// 1. Dump remote DB
 	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping remote database '%s'...", cfg.Remote.DB))
-	sqlDump, err := provider.DumpRemote(ctx)
+	dump, err := provider.DumpRemote(ctx)
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to dump remote db: %v", err))
 		return fmt.Errorf("failed to dump remote db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Dumped remote database '%s'", cfg.Remote.DB))
+	spinner.Success(fmt.Sprintf("Started remote database dump '%s'", cfg.Remote.DB))
 
-	// 2. Apply replacements
-	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements...")
-	sqlDump = ApplyDBReplacements(sqlDump, cfg.DBReplace)
-	spinner.Success("Applied replacements")
-
-	// 3. Write to local DB
-	spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Writing to local database '%s'...", cfg.Local.DB))
-	if err := provider.WriteLocal(ctx, sqlDump); err != nil {
+	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements and writing to local database...")
+	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal); err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to write to local db: %v", err))
 		return fmt.Errorf("failed to write to local db: %w", err)
 	}
 	spinner.Success(fmt.Sprintf("Wrote to local database '%s'", cfg.Local.DB))
-
-	if dumpDB {
-		spinner, _ = pterm.DefaultSpinner.Start("Saving db.sql...")
-		if err := os.WriteFile("db.sql", []byte(sqlDump), 0644); err != nil {
-			spinner.Fail(fmt.Sprintf("Failed to save db.sql: %v", err))
-			return fmt.Errorf("failed to save db.sql: %w", err)
-		}
-		spinner.Success("Saved db.sql")
-	}
 
 	return nil
 }
@@ -72,46 +63,30 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
 	pterm.DefaultSection.Println("Syncing Database (local to remote)")
 
-	// 1. Dump local DB
 	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping local database '%s'...", cfg.Local.DB))
-	sqlDump, err := provider.DumpLocal(ctx)
+	dump, err := provider.DumpLocal(ctx)
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to dump local db: %v", err))
 		return fmt.Errorf("failed to dump local db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Dumped local database '%s'", cfg.Local.DB))
+	spinner.Success(fmt.Sprintf("Started local database dump '%s'", cfg.Local.DB))
 
-	// 2. Apply replacements (Reversed)
-	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements (Reverse)...")
 	var reversedReplacements []DBReplace
-	// Iterate backwards to ensure correct order of operations (e.g. protocol replacement before domain replacement)
 	for i := len(cfg.DBReplace) - 1; i >= 0; i-- {
 		r := cfg.DBReplace[i]
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
-	sqlDump = ApplyDBReplacements(sqlDump, reversedReplacements)
-	spinner.Success("Applied replacements (Reverse)")
 
-	if dumpDB {
-		spinner, _ = pterm.DefaultSpinner.Start("Saving db_reverse.sql...")
-		if err := os.WriteFile("db_reverse.sql", []byte(sqlDump), 0644); err != nil {
-			spinner.Fail(fmt.Sprintf("Failed to save db_reverse.sql: %v", err))
-			return fmt.Errorf("failed to save db_reverse.sql: %w", err)
-		}
-		spinner.Success("Saved db_reverse.sql")
-	}
-
-	// 3. Backup Remote DB
 	spinner, _ = pterm.DefaultSpinner.Start("Backing up remote database...")
 	if err := provider.BackupRemote(ctx); err != nil {
+		_ = dump.Reader.Close()
 		spinner.Fail(fmt.Sprintf("Failed to backup remote db: %v", err))
 		return fmt.Errorf("failed to backup remote db: %w", err)
 	}
 	spinner.Success("Backed up remote database")
 
-	// 4. Write to remote DB
-	spinner, _ = pterm.DefaultSpinner.Start(fmt.Sprintf("Writing to remote database '%s'...", cfg.Remote.DB))
-	if err := provider.WriteRemote(ctx, sqlDump); err != nil {
+	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements (Reverse) and writing to remote database...")
+	if err := writeTransformedDump(ctx, dump, cfg, reversedReplacements, dumpDB, "db_reverse.sql", provider.WriteRemote); err != nil {
 		spinner.Fail(fmt.Sprintf("Failed to write to remote db: %v", err))
 		return fmt.Errorf("failed to write to remote db: %w", err)
 	}
@@ -120,71 +95,150 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 	return nil
 }
 
-func (p *RealDBProvider) DumpRemote(ctx context.Context) (string, error) {
-	args := []string{
-		p.cfg.SSHHost,
-		"-p", p.cfg.Port,
-		"mysqldump", "-uroot", p.cfg.Remote.DB,
+func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replacements []DBReplace, dumpDB bool, dumpPath string, writeDB func(context.Context, io.Reader) error) error {
+	defer dump.Reader.Close()
+
+	reader, transformErr := transformDumpAsync(dump.Reader, cfg, replacements)
+	defer reader.Close()
+
+	var input io.Reader = reader
+	var dumpFile *os.File
+	if dumpDB {
+		file, err := os.Create(dumpPath)
+		if err != nil {
+			return fmt.Errorf("failed to create %s: %w", dumpPath, err)
+		}
+		dumpFile = file
+		input = io.TeeReader(reader, dumpFile)
 	}
 
-	cmd := exec.CommandContext(ctx, "ssh", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("ssh command failed: %s: %w", stderr.String(), err)
+	writeErr := writeDB(ctx, input)
+	if writeErr != nil {
+		_ = reader.Close()
 	}
 
-	return stdout.String(), nil
+	if err := <-transformErr; err != nil && writeErr == nil {
+		writeErr = err
+	}
+	if err := dump.Wait(); err != nil && writeErr == nil {
+		writeErr = err
+	}
+	if dumpFile != nil {
+		if err := dumpFile.Close(); err != nil && writeErr == nil {
+			writeErr = fmt.Errorf("failed to close %s: %w", dumpPath, err)
+		}
+	}
+	return writeErr
 }
 
-func (p *RealDBProvider) DumpLocal(ctx context.Context) (string, error) {
-	composeFile := getComposeFilePath()
+func warnUnsafeRawReplacement(cfg *Config) {
+	if strings.EqualFold(strings.TrimSpace(cfg.DBReplaceEngine), DBReplaceEngineRaw) && isWordPressLikeConfig(cfg) {
+		pterm.Warning.Println("dbReplaceEngine raw is unsafe for WordPress serialized data; use go-serialized unless you accept corruption risk")
+	}
+}
 
-	// Try mariadb-dump first (modern MariaDB containers)
+func isWordPressLikeConfig(cfg *Config) bool {
+	for _, path := range cfg.Sync {
+		if strings.Contains(strings.ToLower(path.Remote), "wp-content") || strings.Contains(strings.ToLower(path.Local), "wp-content") {
+			return true
+		}
+	}
+	return false
+}
+
+func transformDumpAsync(input io.Reader, cfg *Config, replacements []DBReplace) (*io.PipeReader, <-chan error) {
+	reader, writer := io.Pipe()
+	errs := make(chan error, 1)
+
+	go func() {
+		err := TransformSQLDump(input, writer, ReplacementOptionsFromConfig(cfg, replacements))
+		if closeErr := writer.CloseWithError(err); closeErr != nil && err == nil {
+			err = closeErr
+		}
+		errs <- err
+	}()
+
+	return reader, errs
+}
+
+func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
+	args := []string{
+		"-p", p.cfg.Port,
+		p.cfg.SSHHost,
+		"mysqldump", "-uroot",
+	}
+	args = append(args, mysqlDumpFlags()...)
+	args = append(args, p.cfg.Remote.DB)
+
+	cmd := exec.CommandContext(ctx, "ssh", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open ssh stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start ssh dump command: %s: %w", stderr.String(), err)
+	}
+
+	return &DBDump{
+		Reader: stdout,
+		Wait: func() error {
+			if err := cmd.Wait(); err != nil {
+				return fmt.Errorf("ssh dump command failed: %s: %w", stderr.String(), err)
+			}
+			return nil
+		},
+	}, nil
+}
+
+func (p *RealDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
+	composeFile := getComposeFilePath()
+	remoteCommand := fmt.Sprintf(
+		"if command -v mariadb-dump >/dev/null 2>&1; then mariadb-dump -uroot -psecret %s %s; else mysqldump -uroot -psecret %s %s; fi",
+		strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Local.DB), strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Local.DB),
+	)
+
 	args := []string{
 		"compose",
 		"-f", composeFile,
 		"exec", "-T",
-		"mariadb", "mariadb-dump",
-		"-uroot", "-psecret",
-		p.cfg.Local.DB,
+		"mariadb", "sh", "-c", remoteCommand,
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err == nil {
-		return stdout.String(), nil
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open docker stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start docker dump command: %s: %w", stderr.String(), err)
 	}
 
-	// Fallback to mysqldump (older containers or MySQL)
-	args[6] = "mysqldump"
-	cmd = exec.CommandContext(ctx, "docker", args...)
-	stdout.Reset()
-	stderr.Reset()
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("docker command failed (stderr: %s): %w", stderr.String(), err)
-	}
-
-	return stdout.String(), nil
+	return &DBDump{
+		Reader: stdout,
+		Wait: func() error {
+			if err := cmd.Wait(); err != nil {
+				return fmt.Errorf("docker dump command failed: %s: %w", stderr.String(), err)
+			}
+			return nil
+		},
+	}, nil
 }
 
-func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump string) error {
+func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump io.Reader) error {
 	args := []string{
-		p.cfg.SSHHost,
 		"-p", p.cfg.Port,
+		p.cfg.SSHHost,
 		"mysql", "-uroot", p.cfg.Remote.DB,
 	}
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
-	cmd.Stdin = strings.NewReader(sqlDump)
+	cmd.Stdin = sqlDump
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ssh command failed: %s: %w", string(output), err)
@@ -193,7 +247,7 @@ func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump string) error 
 	return nil
 }
 
-func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump string) error {
+func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump io.Reader) error {
 	composeFile := getComposeFilePath()
 
 	if err := ensureUserAndDB(ctx, p.cfg.Local.DB, composeFile); err != nil {
@@ -210,7 +264,7 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump string) error {
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Stdin = strings.NewReader(sqlDump)
+	cmd.Stdin = sqlDump
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker command failed: %s: %w", string(output), err)
@@ -222,13 +276,11 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump string) error {
 func (p *RealDBProvider) BackupRemote(ctx context.Context) error {
 	timestamp := time.Now().Format("20060102_150405")
 	backupFile := fmt.Sprintf("%s_backup_%s.sql", p.cfg.Remote.DB, timestamp)
-
-	// Command: mysqldump -uroot dbname > backup_file.sql
-	remoteCmd := fmt.Sprintf("mysqldump -uroot %s > %s", p.cfg.Remote.DB, backupFile)
+	remoteCmd := fmt.Sprintf("mysqldump -uroot %s %s > %s", strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Remote.DB), shellQuote(backupFile))
 
 	args := []string{
-		p.cfg.SSHHost,
 		"-p", p.cfg.Port,
+		p.cfg.SSHHost,
 		remoteCmd,
 	}
 
@@ -266,23 +318,32 @@ func ensureUserAndDB(ctx context.Context, dbName, composeFile string) error {
 }
 
 func getComposeFilePath() string {
-	// Preserve original behavior but allow override
 	if path := os.Getenv("DSYNC_COMPOSE_FILE"); path != "" {
 		return path
 	}
 	return os.Getenv("HOME") + "/www/dev/docker-compose.yml"
 }
 
+func mysqlDumpFlags() []string {
+	return []string{
+		"--single-transaction",
+		"--quick",
+		"--hex-blob",
+		"--complete-insert",
+		"--default-character-set=utf8mb4",
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
 func ApplyDBReplacements(sql string, replacements []DBReplace) string {
+	return applyStringReplacements(sql, replacements)
+}
+
+func applyStringReplacements(value string, replacements []DBReplace) string {
 	for _, item := range replacements {
-		// Build all possible escape variations of forward slashes
-		// Each variation adds more backslash escaping to handle different contexts:
-		// - Level 0: No escaping (normal URLs)
-		// - Level 1: JSON escaping (\/ instead of /)
-		// - Level 2: Double escaping (\\/ instead of /) - for JSON within SQL strings
-		// - Level 3: Triple escaping (\\\/ instead of /) - for nested contexts
-		// - Level 4: Quadruple escaping (\\\\/ instead of /) - for deeply nested contexts
-		// - Level 5: Quintuple escaping (\\\\\/ instead of /) - extreme cases
 		variations := []struct {
 			from string
 			to   string
@@ -294,15 +355,12 @@ func ApplyDBReplacements(sql string, replacements []DBReplace) string {
 			{strings.ReplaceAll(item.From, "/", `\\\\\/`), strings.ReplaceAll(item.To, "/", `\\\\\/`)},
 		}
 
-		// Apply all escape variations
 		for _, v := range variations {
 			if v.from != item.From {
-				sql = strings.ReplaceAll(sql, v.from, v.to)
+				value = strings.ReplaceAll(value, v.from, v.to)
 			}
 		}
-
-		// Apply the original (unescaped) replacement
-		sql = strings.ReplaceAll(sql, item.From, item.To)
+		value = strings.ReplaceAll(value, item.From, item.To)
 	}
-	return sql
+	return value
 }
