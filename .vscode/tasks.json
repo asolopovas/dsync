@@ -1,0 +1,233 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "just: setup",
+      "type": "shell",
+      "command": "just",
+      "args": ["setup"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "just: tidy",
+      "type": "shell",
+      "command": "just",
+      "args": ["tidy"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: run",
+      "type": "shell",
+      "command": "just run ${input:runArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: help",
+      "type": "shell",
+      "command": "just",
+      "args": ["help"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "just: version",
+      "type": "shell",
+      "command": "just",
+      "args": ["version"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "just: fmt",
+      "type": "shell",
+      "command": "just",
+      "args": ["fmt"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "just: vet",
+      "type": "shell",
+      "command": "just",
+      "args": ["vet"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: test",
+      "type": "shell",
+      "command": "just test ${input:goTestArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: test-one",
+      "type": "shell",
+      "command": "just",
+      "args": ["test-one", "${input:testPattern}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: test-race",
+      "type": "shell",
+      "command": "just test-race ${input:goTestArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: integration-test",
+      "type": "shell",
+      "command": "just integration-test ${input:goTestArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: bench",
+      "type": "shell",
+      "command": "just",
+      "args": ["bench", "${input:benchPattern}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: coverage",
+      "type": "shell",
+      "command": "just",
+      "args": ["coverage"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: coverage-html",
+      "type": "shell",
+      "command": "just",
+      "args": ["coverage-html"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "test",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: check",
+      "type": "shell",
+      "command": "just",
+      "args": ["check"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: ci",
+      "type": "shell",
+      "command": "just",
+      "args": ["ci"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: build",
+      "type": "shell",
+      "command": "just",
+      "args": ["build"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: run-built",
+      "type": "shell",
+      "command": "just run-built ${input:runArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: install",
+      "type": "shell",
+      "command": "just",
+      "args": ["install"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: clean",
+      "type": "shell",
+      "command": "just",
+      "args": ["clean"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "just: release",
+      "type": "shell",
+      "command": "just release ${input:releaseArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: release-patch",
+      "type": "shell",
+      "command": "just release-patch ${input:releaseArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: release-minor",
+      "type": "shell",
+      "command": "just release-minor ${input:releaseArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "just: release-major",
+      "type": "shell",
+      "command": "just release-major ${input:releaseArgs}",
+      "options": { "cwd": "${workspaceFolder}" },
+      "group": "build",
+      "problemMatcher": "$go"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "runArgs",
+      "type": "promptString",
+      "description": "Arguments for dsync (empty for none)",
+      "default": ""
+    },
+    {
+      "id": "goTestArgs",
+      "type": "promptString",
+      "description": "Additional go test args (empty for none)",
+      "default": ""
+    },
+    {
+      "id": "testPattern",
+      "type": "promptString",
+      "description": "go test -run pattern",
+      "default": "Test"
+    },
+    {
+      "id": "benchPattern",
+      "type": "promptString",
+      "description": "go test -bench pattern",
+      "default": "Benchmark"
+    },
+    {
+      "id": "releaseArgs",
+      "type": "promptString",
+      "description": "Release args (for example: --dry-run, --bump patch --no-push)",
+      "default": "--dry-run"
+    }
+  ]
+}

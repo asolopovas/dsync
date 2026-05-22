@@ -5,6 +5,8 @@ db.sql
 db_reverse.sql
 dist/**
 releases/**
-.vscode
+!.vscode/
+.vscode/*
+!.vscode/tasks.json
 __debug_bin
 
