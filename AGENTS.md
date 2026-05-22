@@ -26,6 +26,7 @@ just check test-race     # selected check job
 just check integration-test  # Docker-backed DB import test
 just build               # build ./dist/dsync
 just install             # install current default-branch dev build as dev-<hash>
+just install --stable    # install latest fetched release tag
 just release             # checked dev archives into releases/dev/
 just release --bump patch|minor|major  # stable release flow
 ```

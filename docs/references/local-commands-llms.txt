@@ -11,6 +11,7 @@ just check
 just bench
 just integration-test
 just install
+just install --stable
 
 User commands:
 dsync --gen

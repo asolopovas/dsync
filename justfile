@@ -170,21 +170,42 @@ release *args:
 clean:
     rm -rf {{_dist_dir}} {{_tmp_dir}} {{_release_dir}} releases/v*
 
-# Install the current default-branch dev build. Defaults to the active dsync on PATH, else /usr/local/bin/dsync.
-install dest="":
-    @dest="{{dest}}"; \
+# Install dsync. Dev build by default; use --stable for the latest release tag.
+install *args:
+    @stable=false; dest=""; set -- {{args}}; \
+    while [[ $# -gt 0 ]]; do \
+        case "$1" in \
+            --stable) stable=true; shift ;; \
+            --dev) stable=false; shift ;; \
+            --dest) [[ $# -ge 2 ]] || { echo 'install: --dest requires a value' >&2; exit 2; }; dest="$2"; shift 2 ;; \
+            --dest=*) dest="${1#--dest=}"; [[ -n "${dest}" ]] || { echo 'install: --dest requires a value' >&2; exit 2; }; shift ;; \
+            -h|--help) echo 'usage: just install [--stable|--dev] [--dest PATH|PATH]'; exit 0 ;; \
+            --*) echo "install: unknown argument $1" >&2; exit 2 ;; \
+            *) [[ -z "${dest}" ]] || { echo "install: multiple destinations: ${dest} and $1" >&2; exit 2; }; dest="$1"; shift ;; \
+        esac; \
+    done; \
     if [[ -z "${dest}" ]]; then dest="$(command -v {{_bin}} 2>/dev/null || true)"; fi; \
     if [[ -z "${dest}" ]]; then dest="/usr/local/bin/{{_bin}}"; fi; \
     dir="$(dirname "${dest}")"; \
-    default_branch="$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}' || true)"; \
-    current_branch="$(git branch --show-current 2>/dev/null || true)"; \
-    if [[ -n "${default_branch}" && -n "${current_branch}" && "${current_branch}" != "${default_branch}" ]]; then \
-        echo "install: expected default branch ${default_branch}, currently on ${current_branch}" >&2; \
-        exit 1; \
-    fi; \
-    dev_version="dev-$(git rev-parse --short HEAD)"; \
     tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT; \
-    go build -trimpath -ldflags="-s -w -X main.version=${dev_version}" -o "${tmp}/{{_bin}}" .; \
+    if [[ "${stable}" == true ]]; then \
+        git fetch --tags --force origin; \
+        install_version="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)"; \
+        [[ -n "${install_version}" ]] || { echo 'install: no release tags found' >&2; exit 1; }; \
+        mkdir -p "${tmp}/src"; \
+        git archive "${install_version}" | tar -x -C "${tmp}/src"; \
+        build_dir="${tmp}/src"; \
+    else \
+        default_branch="$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}' || true)"; \
+        current_branch="$(git branch --show-current 2>/dev/null || true)"; \
+        if [[ -n "${default_branch}" && -n "${current_branch}" && "${current_branch}" != "${default_branch}" ]]; then \
+            echo "install: expected default branch ${default_branch}, currently on ${current_branch}" >&2; \
+            exit 1; \
+        fi; \
+        install_version="dev-$(git rev-parse --short HEAD)"; \
+        build_dir="."; \
+    fi; \
+    (cd "${build_dir}" && go build -trimpath -ldflags="-s -w -X main.version=${install_version}" -o "${tmp}/{{_bin}}" .); \
     if [[ -w "${dir}" && (! -e "${dest}" || -w "${dest}") ]]; then \
         install -m 0755 "${tmp}/{{_bin}}" "${dest}"; \
     else \
