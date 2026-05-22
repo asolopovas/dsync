@@ -170,18 +170,22 @@ release *args:
 clean:
     rm -rf {{_dist_dir}} {{_tmp_dir}} {{_release_dir}} releases/v*
 
-# Install the current default-branch dev build to /usr/local/bin/dsync.
-install dest="/usr/local/bin/dsync":
-    @dest="{{dest}}"; dir="$(dirname "${dest}")"; \
+# Install the current default-branch dev build. Defaults to the active dsync on PATH, else /usr/local/bin/dsync.
+install dest="":
+    @dest="{{dest}}"; \
+    if [[ -z "${dest}" ]]; then dest="$(command -v {{_bin}} 2>/dev/null || true)"; fi; \
+    if [[ -z "${dest}" ]]; then dest="/usr/local/bin/{{_bin}}"; fi; \
+    dir="$(dirname "${dest}")"; \
     default_branch="$(git remote show origin 2>/dev/null | awk '/HEAD branch/ {print $NF}' || true)"; \
     current_branch="$(git branch --show-current 2>/dev/null || true)"; \
     if [[ -n "${default_branch}" && -n "${current_branch}" && "${current_branch}" != "${default_branch}" ]]; then \
         echo "install: expected default branch ${default_branch}, currently on ${current_branch}" >&2; \
         exit 1; \
     fi; \
+    dev_version="dev-$(git rev-parse --short HEAD)"; \
     tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT; \
-    go build -trimpath -ldflags="-s -w" -o "${tmp}/{{_bin}}" .; \
-    if [[ -w "${dir}" ]]; then \
+    go build -trimpath -ldflags="-s -w -X main.version=${dev_version}" -o "${tmp}/{{_bin}}" .; \
+    if [[ -w "${dir}" && (! -e "${dest}" || -w "${dest}") ]]; then \
         install -m 0755 "${tmp}/{{_bin}}" "${dest}"; \
     else \
         sudo install -m 0755 "${tmp}/{{_bin}}" "${dest}"; \
