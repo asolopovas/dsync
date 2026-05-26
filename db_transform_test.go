@@ -125,8 +125,36 @@ func TestWordPressLikeFixtureTransform(t *testing.T) {
 	}
 }
 
+func TestTransformSQLDumpSkipsInvalidSerializedWhenValidationDisabled(t *testing.T) {
+	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";'),('plain','https://example.com');"
+	want := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";'),('plain','http://local.test');"
+
+	got, err := transformStringForTest(input, ReplacementOptions{
+		Engine:       DBReplaceEngineGoSerialized,
+		Replacements: []DBReplace{{From: "https://example.com", To: "http://local.test"}},
+	})
+	if err != nil {
+		t.Fatalf("TransformSQLDump failed: %v", err)
+	}
+	if got != want {
+		t.Fatalf("unexpected SQL\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestTransformSQLDumpFailsInvalidSerializedWhenValidationEnabled(t *testing.T) {
+	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";');"
+
+	_, err := transformStringForTest(input, ReplacementOptions{
+		Engine:             DBReplaceEngineGoSerialized,
+		ValidateSerialized: true,
+	})
+	if err == nil {
+		t.Fatal("expected invalid serialized error")
+	}
+}
+
 func TestPHPSerializationSupportsCommonTypes(t *testing.T) {
-	input := `a:7:{s:3:"str";s:6:"Björk";s:4:"bool";b:1;s:4:"null";N;s:3:"int";i:42;s:5:"float";d:1.5;s:3:"obj";O:8:"stdClass":1:{s:3:"url";s:19:"https://example.com";}s:3:"arr";a:1:{s:19:"https://example.com";s:1:"x";}}`
+	input := `a:9:{s:3:"str";s:6:"Björk";s:4:"bool";b:1;s:4:"null";N;s:3:"int";i:42;s:5:"float";d:1.5;s:3:"obj";O:8:"stdClass":1:{s:3:"url";s:19:"https://example.com";}s:3:"arr";a:1:{s:19:"https://example.com";s:1:"x";}s:7:"softref";r:2;s:7:"hardref";R:2;}`
 	got, err := transformSerializedPHP(input, []DBReplace{{From: "https://example.com", To: "http://local.test"}})
 	if err != nil {
 		t.Fatalf("transformSerializedPHP failed: %v", err)
@@ -136,6 +164,9 @@ func TestPHPSerializationSupportsCommonTypes(t *testing.T) {
 	}
 	if !strings.Contains(got, `s:6:"Björk"`) {
 		t.Fatalf("UTF-8 byte length was not preserved: %s", got)
+	}
+	if !strings.Contains(got, `r:2;`) || !strings.Contains(got, `R:2;`) {
+		t.Fatalf("PHP references were not preserved: %s", got)
 	}
 	if _, err := parsePHPSerialized(got); err != nil {
 		t.Fatalf("transformed value is invalid: %v", err)

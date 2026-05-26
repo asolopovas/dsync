@@ -402,7 +402,10 @@ func transformSQLString(value string, options ReplacementOptions) (string, error
 	if isSerializedPHP(value) {
 		transformed, err := transformSerializedPHP(value, options.Replacements)
 		if err != nil {
-			return "", err
+			if options.ValidateSerialized {
+				return "", err
+			}
+			return value, nil
 		}
 		if options.ValidateSerialized && isSerializedPHP(transformed) {
 			if _, err := parsePHPSerialized(transformed); err != nil {
@@ -517,16 +520,19 @@ const (
 	phpString
 	phpArray
 	phpObject
+	phpReference
 )
 
 type phpValue struct {
-	Kind      phpKind
-	Bool      bool
-	Int       int64
-	Float     string
-	String    string
-	Pairs     []phpPair
-	ClassName string
+	Kind          phpKind
+	Bool          bool
+	Int           int64
+	Float         string
+	String        string
+	Pairs         []phpPair
+	ClassName     string
+	ReferenceType byte
+	Reference     string
 }
 
 type phpPair struct {
@@ -548,7 +554,7 @@ func isSerializedPHP(value string) bool {
 		return false
 	}
 	switch value[0] {
-	case 'a', 'b', 'd', 'i', 'O', 's':
+	case 'a', 'b', 'd', 'i', 'O', 's', 'R', 'r':
 		return true
 	default:
 		return false
@@ -621,6 +627,8 @@ func (p *phpParser) parseValue() (phpValue, error) {
 		return p.parseArray()
 	case 'O':
 		return p.parseObject()
+	case 'R', 'r':
+		return p.parseReference()
 	default:
 		return phpValue{}, fmt.Errorf("unsupported serialized type %q at offset %d", p.data[p.pos], p.pos)
 	}
@@ -651,6 +659,19 @@ func (p *phpParser) parseString() (phpValue, error) {
 		return phpValue{}, err
 	}
 	return phpValue{Kind: phpString, String: value}, nil
+}
+
+func (p *phpParser) parseReference() (phpValue, error) {
+	referenceType := p.data[p.pos]
+	p.pos += 2
+	reference, err := p.readUntil(';')
+	if err != nil {
+		return phpValue{}, err
+	}
+	if _, err := strconv.Atoi(reference); err != nil {
+		return phpValue{}, err
+	}
+	return phpValue{Kind: phpReference, ReferenceType: referenceType, Reference: reference}, nil
 }
 
 func (p *phpParser) parseArray() (phpValue, error) {
@@ -826,6 +847,8 @@ func serializePHPValue(value phpValue) string {
 		}
 		builder.WriteByte('}')
 		return builder.String()
+	case phpReference:
+		return fmt.Sprintf("%c:%s;", value.ReferenceType, value.Reference)
 	default:
 		return "N;"
 	}

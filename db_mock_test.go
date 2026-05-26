@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type MockDBProvider struct {
@@ -102,6 +104,63 @@ func TestSyncDB_Forward(t *testing.T) {
 	expectedCalls := []string{"DumpRemote", "WriteLocal"}
 	if len(mock.Calls) != len(expectedCalls) {
 		t.Errorf("Expected calls %v, got %v", expectedCalls, mock.Calls)
+	}
+}
+
+type closeSignalReadCloser struct {
+	reader io.Reader
+	once   sync.Once
+	closed chan struct{}
+}
+
+func newCloseSignalReadCloser(value string) *closeSignalReadCloser {
+	return &closeSignalReadCloser{
+		reader: strings.NewReader(value),
+		closed: make(chan struct{}),
+	}
+}
+
+func (r *closeSignalReadCloser) Read(p []byte) (int, error) {
+	return r.reader.Read(p)
+}
+
+func (r *closeSignalReadCloser) Close() error {
+	r.once.Do(func() { close(r.closed) })
+	return nil
+}
+
+func TestWriteTransformedDumpStopsDumpOnTransformError(t *testing.T) {
+	reader := newCloseSignalReadCloser("INSERT INTO t (`v`) VALUES ('s:5:\"abc\";');")
+	dump := &DBDump{
+		Reader: reader,
+		Wait: func() error {
+			select {
+			case <-reader.closed:
+				return nil
+			case <-time.After(time.Second):
+				return context.DeadlineExceeded
+			}
+		},
+	}
+
+	err := writeTransformedDump(
+		context.Background(),
+		dump,
+		&Config{DBReplaceEngine: DBReplaceEngineGoSerialized, ValidateSerialized: true},
+		nil,
+		false,
+		"db.sql",
+		func(ctx context.Context, sql io.Reader) error {
+			_, err := io.Copy(io.Discard, sql)
+			return err
+		},
+		&dbStreamProgress{},
+	)
+	if err == nil {
+		t.Fatal("expected transform error")
+	}
+	if !strings.Contains(err.Error(), "transform table") {
+		t.Fatalf("expected transform error, got %v", err)
 	}
 }
 

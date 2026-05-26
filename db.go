@@ -52,7 +52,7 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 	spinner.Success(fmt.Sprintf("Stage 1/3 complete: remote dump stream started for '%s'", cfg.Remote.DB))
 
 	progress := &dbStreamProgress{}
-	label := fmt.Sprintf("Stage 2/3 + 3/3: remote dump -> %s replacements -> local import '%s'", ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, cfg.Local.DB)
+	label := fmt.Sprintf("DB 2/3 transform (%s) + 3/3 import local '%s'", ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, cfg.Local.DB)
 	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
 	stopProgress := startDBProgress(ctx, spinner, label, progress)
 	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal, progress); err != nil {
@@ -92,7 +92,7 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 	spinner.Success("Stage 2/4 complete: remote database backup created")
 
 	progress := &dbStreamProgress{}
-	label := fmt.Sprintf("Stage 3/4 + 4/4: local dump -> reverse %s replacements -> remote import '%s'", ReplacementOptionsFromConfig(cfg, reversedReplacements).Engine, cfg.Remote.DB)
+	label := fmt.Sprintf("DB 3/4 reverse transform (%s) + 4/4 import remote '%s'", ReplacementOptionsFromConfig(cfg, reversedReplacements).Engine, cfg.Remote.DB)
 	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
 	stopProgress := startDBProgress(ctx, spinner, label, progress)
 	if err := writeTransformedDump(ctx, dump, cfg, reversedReplacements, dumpDB, "db_reverse.sql", provider.WriteRemote, progress); err != nil {
@@ -136,8 +136,11 @@ func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replac
 		_ = reader.Close()
 	}
 
-	if err := <-transformErr; err != nil && writeErr == nil {
+	if err := <-transformErr; err != nil {
 		writeErr = err
+	}
+	if writeErr != nil {
+		_ = dump.Reader.Close()
 	}
 	if err := dump.Wait(); err != nil && writeErr == nil {
 		writeErr = err
@@ -248,17 +251,9 @@ func startDBProgress(ctx context.Context, spinner *pterm.SpinnerPrinter, label s
 }
 
 func dbProgressText(label string, sourceBytes, outputBytes int64, elapsed, idle time.Duration) string {
-	state := "waiting for dump bytes"
-	switch {
-	case outputBytes > 0:
-		state = "transforming and importing"
-	case sourceBytes > 0:
-		state = "reading/parsing dump; waiting for the current SQL statement to finish"
-	}
-
-	message := fmt.Sprintf("%s (%s; read %s, sent %s, elapsed %s)", label, state, formatBytes(sourceBytes), formatBytes(outputBytes), elapsed.Round(time.Second))
-	if idle >= 15*time.Second {
-		message += fmt.Sprintf(" — no stream progress for %s", idle.Round(time.Second))
+	message := fmt.Sprintf("%s (read %s, sent %s, elapsed %s)", label, formatBytes(sourceBytes), formatBytes(outputBytes), elapsed.Round(time.Second))
+	if idle >= 10*time.Second {
+		message += fmt.Sprintf(" — idle %s", idle.Round(time.Second))
 	}
 	return message
 }
