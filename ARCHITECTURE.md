@@ -35,7 +35,7 @@ Forward: `sshHost:remote/ -> local/`. Reverse: `local/ -> sshHost:remote/`.
 ### Database forward: remote to local
 
 1. `DumpRemote` streams remote `mysqldump -uroot` over ssh.
-2. The configured replacement engine transforms the stream.
+2. The configured replacement engine transforms the stream while CLI progress reports bytes read from the dump and bytes sent to import.
 3. `WriteLocal` creates local DB/user if needed, then imports via Docker Compose.
 4. `--dump` tees the transformed stream to `db.sql` while importing.
 
@@ -54,3 +54,4 @@ Forward: `sshHost:remote/ -> local/`. Reverse: `local/ -> sshHost:remote/`.
 - Keep command construction explicit. Hidden shell pipelines are harder to inspect.
 - Replacement engines are selected by config: `go-serialized`, `raw`, or `none`; there is no fallback.
 - Column-aware replacement can skip `guid` only when dump statements include column names. Dsync uses `--complete-insert` for generated dumps.
+- Generated dumps also use `--skip-extended-insert` so the transformer emits row-sized statements instead of holding very large multi-row INSERTs before import progress appears.

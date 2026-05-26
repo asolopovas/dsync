@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/pterm/pterm"
@@ -42,20 +43,25 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 
 	pterm.DefaultSection.Println("Syncing Database (remote to local)")
 
-	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping remote database '%s'...", cfg.Remote.DB))
+	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Stage 1/3: starting remote database dump '%s'...", cfg.Remote.DB))
 	dump, err := provider.DumpRemote(ctx)
 	if err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to dump remote db: %v", err))
+		spinner.Fail(fmt.Sprintf("Stage 1/3 failed: remote database dump: %v", err))
 		return fmt.Errorf("failed to dump remote db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Started remote database dump '%s'", cfg.Remote.DB))
+	spinner.Success(fmt.Sprintf("Stage 1/3 complete: remote dump stream started for '%s'", cfg.Remote.DB))
 
-	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements and writing to local database...")
-	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal); err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to write to local db: %v", err))
+	progress := &dbStreamProgress{}
+	label := fmt.Sprintf("Stage 2/3 + 3/3: remote dump -> %s replacements -> local import '%s'", ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, cfg.Local.DB)
+	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
+	stopProgress := startDBProgress(ctx, spinner, label, progress)
+	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal, progress); err != nil {
+		stopProgress()
+		spinner.Fail(fmt.Sprintf("Stage 2/3 + 3/3 failed: local database import: %v", err))
 		return fmt.Errorf("failed to write to local db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Wrote to local database '%s'", cfg.Local.DB))
+	stopProgress()
+	spinner.Success(fmt.Sprintf("Stage 3/3 complete: wrote %s to local database '%s'", formatBytes(progress.outputBytes.Load()), cfg.Local.DB))
 
 	return nil
 }
@@ -63,13 +69,13 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
 	pterm.DefaultSection.Println("Syncing Database (local to remote)")
 
-	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Dumping local database '%s'...", cfg.Local.DB))
+	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Stage 1/4: starting local database dump '%s'...", cfg.Local.DB))
 	dump, err := provider.DumpLocal(ctx)
 	if err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to dump local db: %v", err))
+		spinner.Fail(fmt.Sprintf("Stage 1/4 failed: local database dump: %v", err))
 		return fmt.Errorf("failed to dump local db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Started local database dump '%s'", cfg.Local.DB))
+	spinner.Success(fmt.Sprintf("Stage 1/4 complete: local dump stream started for '%s'", cfg.Local.DB))
 
 	var reversedReplacements []DBReplace
 	for i := len(cfg.DBReplace) - 1; i >= 0; i-- {
@@ -77,31 +83,44 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
 
-	spinner, _ = pterm.DefaultSpinner.Start("Backing up remote database...")
+	spinner, _ = pterm.DefaultSpinner.Start("Stage 2/4: backing up remote database before import...")
 	if err := provider.BackupRemote(ctx); err != nil {
 		_ = dump.Reader.Close()
-		spinner.Fail(fmt.Sprintf("Failed to backup remote db: %v", err))
+		spinner.Fail(fmt.Sprintf("Stage 2/4 failed: remote database backup: %v", err))
 		return fmt.Errorf("failed to backup remote db: %w", err)
 	}
-	spinner.Success("Backed up remote database")
+	spinner.Success("Stage 2/4 complete: remote database backup created")
 
-	spinner, _ = pterm.DefaultSpinner.Start("Applying replacements (Reverse) and writing to remote database...")
-	if err := writeTransformedDump(ctx, dump, cfg, reversedReplacements, dumpDB, "db_reverse.sql", provider.WriteRemote); err != nil {
-		spinner.Fail(fmt.Sprintf("Failed to write to remote db: %v", err))
+	progress := &dbStreamProgress{}
+	label := fmt.Sprintf("Stage 3/4 + 4/4: local dump -> reverse %s replacements -> remote import '%s'", ReplacementOptionsFromConfig(cfg, reversedReplacements).Engine, cfg.Remote.DB)
+	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
+	stopProgress := startDBProgress(ctx, spinner, label, progress)
+	if err := writeTransformedDump(ctx, dump, cfg, reversedReplacements, dumpDB, "db_reverse.sql", provider.WriteRemote, progress); err != nil {
+		stopProgress()
+		spinner.Fail(fmt.Sprintf("Stage 3/4 + 4/4 failed: remote database import: %v", err))
 		return fmt.Errorf("failed to write to remote db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Wrote to remote database '%s'", cfg.Remote.DB))
+	stopProgress()
+	spinner.Success(fmt.Sprintf("Stage 4/4 complete: wrote %s to remote database '%s'", formatBytes(progress.outputBytes.Load()), cfg.Remote.DB))
 
 	return nil
 }
 
-func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replacements []DBReplace, dumpDB bool, dumpPath string, writeDB func(context.Context, io.Reader) error) error {
+func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replacements []DBReplace, dumpDB bool, dumpPath string, writeDB func(context.Context, io.Reader) error, progress *dbStreamProgress) error {
 	defer dump.Reader.Close()
 
-	reader, transformErr := transformDumpAsync(dump.Reader, cfg, replacements)
+	inputReader := dump.Reader
+	if progress != nil {
+		inputReader = &countingReadCloser{ReadCloser: dump.Reader, counter: &progress.sourceBytes}
+	}
+
+	reader, transformErr := transformDumpAsync(inputReader, cfg, replacements)
 	defer reader.Close()
 
 	var input io.Reader = reader
+	if progress != nil {
+		input = &countingReader{reader: reader, counter: &progress.outputBytes}
+	}
 	var dumpFile *os.File
 	if dumpDB {
 		file, err := os.Create(dumpPath)
@@ -109,7 +128,7 @@ func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replac
 			return fmt.Errorf("failed to create %s: %w", dumpPath, err)
 		}
 		dumpFile = file
-		input = io.TeeReader(reader, dumpFile)
+		input = io.TeeReader(input, dumpFile)
 	}
 
 	writeErr := writeDB(ctx, input)
@@ -159,6 +178,104 @@ func transformDumpAsync(input io.Reader, cfg *Config, replacements []DBReplace) 
 	}()
 
 	return reader, errs
+}
+
+type dbStreamProgress struct {
+	sourceBytes atomic.Int64
+	outputBytes atomic.Int64
+}
+
+type countingReadCloser struct {
+	io.ReadCloser
+	counter *atomic.Int64
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if n > 0 {
+		r.counter.Add(int64(n))
+	}
+	return n, err
+}
+
+type countingReader struct {
+	reader  io.Reader
+	counter *atomic.Int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n > 0 {
+		r.counter.Add(int64(n))
+	}
+	return n, err
+}
+
+func startDBProgress(ctx context.Context, spinner *pterm.SpinnerPrinter, label string, progress *dbStreamProgress) func() {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	started := time.Now()
+	lastProgressAt := started
+	lastTotal := int64(0)
+
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sourceBytes := progress.sourceBytes.Load()
+				outputBytes := progress.outputBytes.Load()
+				total := sourceBytes + outputBytes
+				if total != lastTotal {
+					lastTotal = total
+					lastProgressAt = time.Now()
+				}
+				spinner.UpdateText(dbProgressText(label, sourceBytes, outputBytes, time.Since(started), time.Since(lastProgressAt)))
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return func() {
+		close(done)
+		<-stopped
+	}
+}
+
+func dbProgressText(label string, sourceBytes, outputBytes int64, elapsed, idle time.Duration) string {
+	state := "waiting for dump bytes"
+	switch {
+	case outputBytes > 0:
+		state = "transforming and importing"
+	case sourceBytes > 0:
+		state = "reading/parsing dump; waiting for the current SQL statement to finish"
+	}
+
+	message := fmt.Sprintf("%s (%s; read %s, sent %s, elapsed %s)", label, state, formatBytes(sourceBytes), formatBytes(outputBytes), elapsed.Round(time.Second))
+	if idle >= 15*time.Second {
+		message += fmt.Sprintf(" — no stream progress for %s", idle.Round(time.Second))
+	}
+	return message
+}
+
+func formatBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value := float64(bytes)
+	for _, suffix := range []string{"KiB", "MiB", "GiB", "TiB"} {
+		value /= unit
+		if value < unit {
+			return fmt.Sprintf("%.1f %s", value, suffix)
+		}
+	}
+	return fmt.Sprintf("%.1f PiB", value/unit)
 }
 
 func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
@@ -330,6 +447,7 @@ func mysqlDumpFlags() []string {
 		"--quick",
 		"--hex-blob",
 		"--complete-insert",
+		"--skip-extended-insert",
 		"--default-character-set=utf8mb4",
 	}
 }
