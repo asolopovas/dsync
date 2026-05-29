@@ -60,7 +60,7 @@ Before reverse sync, confirm target host, database, replacement reversibility, a
 - File sync: verify ssh, rsync on both hosts, port, path existence, excludes.
 - Local DB: verify Docker, compose file, `mariadb` service, root password convention.
 - Remote DB: verify `mysqldump`/`mysql` and root access on remote host.
-- Serialized replacement: inspect reported table/row/column; use `raw` only when corruption risk is acceptable.
+- Serialized replacement: inspect reported table/row/column; only use the legacy `raw` override when corruption risk is acceptable.
 
 ## Release reliability
 

@@ -8,12 +8,11 @@ Fields:
 - remote.db: remote database name used by mysqldump/mysql.
 - local.db: local database name used inside Docker Compose mariadb service.
 - remote.host/local.host: present in structs, not used by current commands.
-- dbReplaceEngine: go-serialized, raw, none. Empty defaults based on WordPress-looking sync paths.
-- validateSerialized: re-parse transformed serialized PHP values and fail if invalid.
-- skipColumns: columns skipped by column-aware engines; guid is always skipped by default.
-- dbReplace: ordered {from,to} replacement list.
+- dbReplace: ordered {from,to} replacement list. If empty, DB dumps stream unchanged.
 - sync[].remote/local: directory endpoints; trailing slash normalization is required.
 - sync[].exclude: rsync --exclude patterns.
 
 Forward replacements: from -> to in listed order.
 Reverse replacements: to -> from in reverse list order.
+
+DB replacement options are derived automatically. With replacements, WordPress-looking sync paths use serialized-safe replacement; other paths use raw string replacement. Serialized validation is enabled by default, and guid columns are always skipped by the serialized-safe engine. Legacy configs may still contain dbReplaceEngine, validateSerialized, or skipColumns overrides, but do not add them to new minimal configs.

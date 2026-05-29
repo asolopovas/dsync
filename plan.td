@@ -2,7 +2,7 @@
 
 ## Status
 
-Completed for the Go-only replacement path. Dsync now uses one selected replacement engine (`go-serialized`, `raw`, or `none`) with no fallback/WP-CLI path.
+Completed for the Go-only replacement path. Dsync now derives the replacement engine from minimal config and has no WP-CLI fallback path.
 
 ## Goal
 
@@ -10,12 +10,12 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
 
 ## Tasks
 
-- [x] Add DB replacement engine config
-  - [x] Add `dbReplaceEngine` config option.
-  - [x] Supported values: `raw`, `go-serialized`, `none`.
-  - [x] Default to `go-serialized` for WordPress-style configs.
-  - [x] Add `validateSerialized` boolean config option.
-  - [x] Do not add a fallback engine; Dsync uses exactly the selected engine.
+- [x] Add automatic DB replacement engine selection
+  - [x] Support internal engines: `raw`, `go-serialized`, `none`.
+  - [x] Default to `none` when there are no replacements.
+  - [x] Default to `go-serialized` for WordPress-style configs with replacements.
+  - [x] Keep legacy `dbReplaceEngine` and `validateSerialized` overrides for existing configs.
+  - [x] Do not add a WP-CLI fallback engine.
 
 - [x] Refactor DB sync to support streaming
   - [x] Replace full SQL string dump/import flow with `io.Reader` / `io.Writer` pipeline.
@@ -43,7 +43,7 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
 
 - [x] Add column-aware replacement rules
   - [x] Skip `guid` columns by default.
-  - [x] Support configurable `skipColumns`.
+  - [x] Keep legacy configurable `skipColumns` while skipping `guid` by default.
   - [x] Defer `includeTables` / `skipTables`; not needed for the current engine.
   - [x] Ensure replacement still works when column list is unavailable and document that column skipping requires column names.
 
@@ -69,13 +69,13 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
 - [x] Add serialized validation without WP-CLI
   - [x] Detect values that look serialized but fail unserialization during stream transformation.
   - [x] Report table, row, and column for transformation failures.
-  - [x] Make validation optional via `validateSerialized`.
+  - [x] Enable validation by default and keep `validateSerialized` as a legacy opt-out.
   - [x] Fail sync when transformed serialized values are invalid.
   - [x] Verify transformed values import into MariaDB in the Docker-backed integration test.
 
 - [x] Do not implement WP-CLI replacement
   - [x] Use the Go serialized engine as the WordPress-safe method.
-  - [x] Do not implement fallback; users select exactly one engine.
+  - [x] Do not implement fallback; dsync derives or uses the legacy configured engine.
 
 - [x] Add benchmarks
   - [x] Benchmark raw replacement.
@@ -100,7 +100,7 @@ Refactor Dsync so WordPress database sync is fast, serialization-safe, and does 
   - [x] Document release commands and benchmark snapshot.
 
 - [x] Migration cleanup
-  - [x] Keep backward compatibility for existing configs by defaulting empty `dbReplaceEngine` from sync paths.
+  - [x] Keep backward compatibility for existing configs while generated configs omit derived DB options.
   - [x] Warn when using unsafe `raw` replacement with likely WordPress paths.
   - [x] Add clear error messages for parser failures.
   - [x] Ensure reverse sync uses the same safe engine with reversed replacements.

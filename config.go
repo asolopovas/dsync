@@ -7,15 +7,16 @@ import (
 )
 
 type Config struct {
-	SSHHost            string       `json:"sshHost"`
-	Port               string       `json:"port"`
-	Remote             HostSettings `json:"remote"`
-	Local              HostSettings `json:"local"`
-	DBReplace          []DBReplace  `json:"dbReplace"`
-	DBReplaceEngine    string       `json:"dbReplaceEngine,omitempty"`
-	ValidateSerialized bool         `json:"validateSerialized,omitempty"`
-	SkipColumns        []string     `json:"skipColumns,omitempty"`
-	Sync               []SyncPath   `json:"sync"`
+	SSHHost   string       `json:"sshHost"`
+	Port      string       `json:"port"`
+	Remote    HostSettings `json:"remote"`
+	Local     HostSettings `json:"local"`
+	DBReplace []DBReplace  `json:"dbReplace"`
+	// Deprecated optional overrides. Minimal configs omit these; dsync derives safe defaults.
+	DBReplaceEngine    string     `json:"dbReplaceEngine,omitempty"`
+	ValidateSerialized *bool      `json:"validateSerialized,omitempty"`
+	SkipColumns        []string   `json:"skipColumns,omitempty"`
+	Sync               []SyncPath `json:"sync"`
 }
 
 type HostSettings struct {
@@ -65,13 +66,10 @@ func GenerateConfig(path string) error {
 				Exclude: []string{"some-plugins"},
 			},
 			{
-				Remote: "/home/username/public_html/wp-content/uploads",
-				Local:  "/home/usernmae/www/host.test/wp-content/uploads",
+				Remote: "/home/user/public_html/wp-content/uploads",
+				Local:  "/home/user/www/host.test/wp-content/uploads",
 			},
 		},
-		DBReplaceEngine:    "go-serialized",
-		ValidateSerialized: true,
-		SkipColumns:        []string{"guid"},
 		DBReplace: []DBReplace{
 			{From: "https://some.domain.com", To: "http://local.test"},
 			{From: "/home/remote/public_html", To: "/home/user/www/project"},

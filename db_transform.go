@@ -31,7 +31,7 @@ type sqlValue struct {
 func ReplacementOptionsFromConfig(cfg *Config, replacements []DBReplace) ReplacementOptions {
 	engine := strings.TrimSpace(cfg.DBReplaceEngine)
 	if engine == "" {
-		engine = defaultDBReplaceEngine(cfg)
+		engine = defaultDBReplaceEngine(cfg, replacements)
 	}
 
 	skipColumns := append([]string{}, cfg.SkipColumns...)
@@ -41,17 +41,24 @@ func ReplacementOptionsFromConfig(cfg *Config, replacements []DBReplace) Replace
 
 	return ReplacementOptions{
 		Engine:             engine,
-		ValidateSerialized: cfg.ValidateSerialized,
+		ValidateSerialized: validateSerialized(cfg),
 		Replacements:       replacements,
 		SkipColumns:        skipColumns,
 	}
 }
 
-func defaultDBReplaceEngine(cfg *Config) string {
+func defaultDBReplaceEngine(cfg *Config, replacements []DBReplace) string {
+	if len(replacements) == 0 {
+		return DBReplaceEngineNone
+	}
 	if isWordPressLikeConfig(cfg) {
 		return DBReplaceEngineGoSerialized
 	}
 	return DBReplaceEngineRaw
+}
+
+func validateSerialized(cfg *Config) bool {
+	return cfg.ValidateSerialized == nil || *cfg.ValidateSerialized
 }
 
 func TransformSQLDump(input io.Reader, output io.Writer, options ReplacementOptions) error {

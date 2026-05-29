@@ -8,14 +8,13 @@ Make database replacement streaming, WordPress-safe, and independent of WP-CLI.
 
 ## Shipped decisions
 
-- Supported engines: `go-serialized`, `raw`, `none`.
-- No fallback engine; Dsync uses exactly the selected engine.
-- Empty config defaults to `go-serialized` for WordPress-looking sync paths, `raw` otherwise.
+- Internal engines: `go-serialized`, `raw`, `none`.
+- Minimal configs omit engine selection; Dsync derives `none` for empty replacements, `go-serialized` for WordPress-looking paths, and `raw` otherwise.
 - DB sync streams dumps through `io.Reader`/`io.Writer` transformers.
 - Dsync dumps with `--single-transaction`, `--quick`, `--hex-blob`, `--complete-insert`, and `--default-character-set=utf8mb4`.
-- Column-aware replacement skips `guid` by default and supports `skipColumns`.
+- Column-aware replacement skips `guid` by default; legacy configs can add more skipped columns with `skipColumns`.
 - In-repo PHP serialization support rewrites strings with corrected byte lengths, including nested serialized strings.
-- `validateSerialized` can fail sync on invalid transformed serialized values.
+- Serialized validation is enabled by default; legacy configs can disable it with `validateSerialized: false`.
 
 ## Verification kept
 

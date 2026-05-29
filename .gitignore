@@ -9,4 +9,5 @@ releases/**
 .vscode/*
 !.vscode/tasks.json
 __debug_bin
+.pi-lens/
 

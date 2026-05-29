@@ -52,7 +52,7 @@ Forward: `sshHost:remote/ -> local/`. Reverse: `local/ -> sshHost:remote/`.
 - Keep flags thin; put behavior in testable functions.
 - `DBProvider` separates orchestration from real shell commands.
 - Keep command construction explicit. Hidden shell pipelines are harder to inspect.
-- Replacement engines are selected by config: `go-serialized`, `raw`, or `none`; there is no fallback.
-- `go-serialized` repairs PHP serialized string lengths and preserves PHP `r`/`R` references. Invalid or unsupported serialized values are left unchanged unless `validateSerialized` is enabled.
-- Column-aware replacement can skip `guid` only when dump statements include column names. Dsync uses `--complete-insert` for generated dumps.
+- Replacement engines are derived from minimal config: empty replacements stream unchanged; WordPress-looking paths use `go-serialized`; other paths use `raw`.
+- `go-serialized` repairs PHP serialized string lengths, preserves PHP `r`/`R` references, and validates transformed serialized values by default.
+- Column-aware replacement skips `guid` when dump statements include column names. Dsync uses `--complete-insert` for generated dumps.
 - Generated dumps also use `--skip-extended-insert` so the transformer emits row-sized statements instead of holding very large multi-row INSERTs before import progress appears.

@@ -66,9 +66,6 @@ dsync -g
     "host": "localhost",
     "db": "local_db_name"
   },
-  "dbReplaceEngine": "go-serialized",
-  "validateSerialized": true,
-  "skipColumns": ["guid"],
   "dbReplace": [
     {
       "from": "http://remote-site.com",
@@ -91,10 +88,7 @@ dsync -g
 - **sshHost**: The SSH connection string (user@host).
 - **port**: The SSH port (default is usually 22).
 - **remote/local**: Database connection settings for remote and local environments.
-- **dbReplaceEngine**: Replacement engine. Use `go-serialized` for WordPress, `raw` for simple dumps, or `none` to skip replacements.
-- **validateSerialized**: Validate transformed PHP serialized values while streaming.
-- **skipColumns**: Columns skipped by the column-aware engine; `guid` is skipped by default.
-- **dbReplace**: List of string replacements to apply to the database dump.
+- **dbReplace**: List of string replacements to apply to the database dump. Replacement mode is automatic: WordPress-looking paths use serialized-safe replacement, `guid` is skipped by default, and empty replacement lists stream unchanged.
 - **sync**: List of file paths to synchronize. Supports exclude patterns.
 
 ## Usage

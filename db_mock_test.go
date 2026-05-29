@@ -143,10 +143,11 @@ func TestWriteTransformedDumpStopsDumpOnTransformError(t *testing.T) {
 		},
 	}
 
+	validateSerialized := true
 	err := writeTransformedDump(
 		context.Background(),
 		dump,
-		&Config{DBReplaceEngine: DBReplaceEngineGoSerialized, ValidateSerialized: true},
+		&Config{DBReplaceEngine: DBReplaceEngineGoSerialized, ValidateSerialized: &validateSerialized},
 		nil,
 		false,
 		"db.sql",
