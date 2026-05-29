@@ -1,30 +1,27 @@
-# SECURITY
+# Security
 
-Dsync handles remote servers, database dumps, and local configs. Treat generated data as sensitive.
+Dsync touches remote servers, DB dumps, and private configs. Treat generated data as sensitive.
 
-## Secrets and private artifacts
-
-Never commit:
+## Never commit
 
 - `dsync-config.json`
 - `configs/**`
-- `db.sql`
-- `db_reverse.sql`
+- `db.sql`, `db_reverse.sql`
 - `db/**`
 - `dist/dsync`
 - `releases/**`
 
-Configs can contain hosts, paths, and database names. Dumps can contain user data.
+Configs may reveal hosts, paths, DB names, and replacement targets. Dumps may contain user data.
 
 ## Destructive actions
 
-- Reverse sync writes local data to remote. Use only with an intended target.
+- Reverse sync writes local state to remote.
 - Reverse DB sync must create a remote backup before import.
-- Do not run manual remote checks unless the target is safe and task-relevant.
+- Do not probe remote systems unless the target is task-relevant and safe.
 - Keep command errors verbose enough to diagnose access and dependency failures.
 
 ## Command safety
 
 - Preserve context-aware external commands.
 - Keep shell construction explicit and testable.
-- Avoid hiding remote writes behind helper names that do not mention direction or target.
+- Names and output must include direction and target for remote writes.

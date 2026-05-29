@@ -1,18 +1,18 @@
-# DESIGN
+# Design
 
-Dsync favors explicit orchestration over hidden automation. Sync operations are easy to inspect, test, and abort.
+Dsync favors inspectable sync over hidden automation.
 
 ## Decisions
 
-- Single-package CLI until seams become painful enough to justify packages.
-- Cobra owns command wiring; sync behavior lives behind small functions.
-- `DBProvider` is the DB orchestration seam for tests and future command-provider refactors.
-- DB dumps stream through transformers; avoid whole-dump memory use where possible.
-- Reverse DB sync must back up remote before remote import.
-- File sync treats endpoints as directories; trailing slash normalization is required.
+- Stay single-package until seams become painful.
+- Cobra wires commands; sync behavior sits behind small functions.
+- `DBProvider` is the test seam for DB orchestration.
+- Dumps stream; avoid whole-dump memory use.
+- Reverse DB sync backs up remote before import.
+- File endpoints are directories; trailing slash normalization is required.
 
-## Change guidance
+## Change rules
 
-- Add tests before changing sync order, replacement order, or backup behavior.
-- Prefer explicit arg builders over opaque shell strings when refactoring commands.
-- Promote repeated review comments into docs, tests, or `just` tasks.
+- Test sync order, replacement order, and backup behavior before changing them.
+- Prefer explicit argv builders over opaque shell strings.
+- Promote repeated review feedback into docs, tests, `just` tasks, or lints.

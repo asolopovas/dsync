@@ -1,58 +1,55 @@
-# ARCHITECTURE.md
+# Architecture
 
-Dsync is a single-package Go CLI. It syncs directory trees with `rsync` and streams MySQL/MariaDB dumps through replacement engines.
+Dsync is a single-package Go CLI. It syncs directories with `rsync` and streams MySQL/MariaDB dumps through replacement engines.
 
-## Source map
+## Code map
 
-| Path | Responsibility |
+| Path | Owns |
 | --- | --- |
-| `main.go` | Process entry; calls `Execute()`. |
-| `root.go` | Cobra commands, flags, version, config loading, operation dispatch, fish completion. |
-| `config.go` | JSON config structs, loading, default config generation. |
-| `sync.go` | File sync presentation and `rsync` invocation. |
-| `db.go` | DB orchestration, command provider, dump/import streaming, local DB creation. |
-| `db_transform.go` | SQL stream transformation, replacements, INSERT parsing, PHP serialization-safe rewriting. |
-| `*_test.go` | Unit and integration coverage for orchestration, replacement, paths, fixtures. |
-| `justfile` | Development, verification, benchmark, build, and release tasks. |
+| `main.go` | process entry |
+| `root.go` | Cobra flags, config load, dispatch, completion |
+| `config.go` | JSON config and generation |
+| `sync.go` | file sync UI and `rsync` invocation |
+| `db.go` | DB orchestration, providers, dump/import streaming |
+| `db_transform.go` | SQL parsing, replacements, PHP serialization repair |
+| `*_test.go` | unit, orchestration, fixture, integration coverage |
+| `justfile` | local/CI/release workflow |
 
-## External dependencies
+## Runtime dependencies
 
-- `ssh` reaches `sshHost` using `port`.
-- `rsync` must exist locally and remotely for file sync.
-- Remote DB commands assume `mysqldump`/`mysql` root access without an interactive password prompt.
-- Local DB commands use `docker compose exec -T mariadb ...`.
-- Default local compose file: `$HOME/www/dev/docker-compose.yml`; override with `DSYNC_COMPOSE_FILE`.
+- Local: `ssh`, `rsync`, Go, Docker Compose with `mariadb` service for DB import.
+- Remote: `rsync`, `mysqldump`, `mysql`, root DB access without interactive prompts.
+- Compose file: `$HOME/www/dev/docker-compose.yml`, override with `DSYNC_COMPOSE_FILE`.
 - Local MariaDB root password convention: `secret`.
 
 ## Data flows
 
-### Files
+Files:
 
-Forward: `sshHost:remote/ -> local/`. Reverse: `local/ -> sshHost:remote/`.
+- Forward: `sshHost:remote/ -> local/`.
+- Reverse: `local/ -> sshHost:remote/`.
+- `SyncFiles` enforces directory trailing slashes and passes excludes to `rsync -azr`.
 
-`SyncFiles` normalizes both endpoints with trailing slashes, builds `rsync -azr -e "ssh -p <port>" --info=progress2`, and appends each `--exclude`.
+DB forward:
 
-### Database forward: remote to local
+1. Remote `mysqldump -uroot` streams over ssh.
+2. Transformer applies configured replacements while progress counts read/sent bytes.
+3. Local Docker MariaDB creates DB/user if needed and imports.
+4. `--dump` tees transformed SQL to `db.sql`.
 
-1. `DumpRemote` streams remote `mysqldump -uroot` over ssh.
-2. The configured replacement engine transforms the stream while CLI progress reports bytes read from the dump and bytes sent to import.
-3. `WriteLocal` creates local DB/user if needed, then imports via Docker Compose.
-4. `--dump` tees the transformed stream to `db.sql` while importing.
+DB reverse:
 
-### Database reverse: local to remote
-
-1. `DumpLocal` streams local `mariadb-dump` when available, else `mysqldump`.
-2. Replacements are inverted and applied in reverse list order.
-3. `BackupRemote` writes `<db>_backup_<timestamp>.sql` before any remote write.
-4. `WriteRemote` imports the transformed stream over ssh.
-5. `--dump` tees the transformed stream to `db_reverse.sql`.
+1. Local dump streams from `mariadb-dump` or `mysqldump`.
+2. Replacement list is inverted and applied in reverse order.
+3. Remote backup `<db>_backup_<timestamp>.sql` is created before import.
+4. Remote `mysql` imports over ssh.
+5. `--dump` tees transformed SQL to `db_reverse.sql`.
 
 ## Boundaries
 
-- Keep flags thin; put behavior in testable functions.
-- `DBProvider` separates orchestration from real shell commands.
-- Keep command construction explicit. Hidden shell pipelines are harder to inspect.
-- Replacement engines are derived from minimal config: empty replacements stream unchanged; WordPress-looking paths use `go-serialized`; other paths use `raw`.
-- `go-serialized` repairs PHP serialized string lengths, preserves PHP `r`/`R` references, and validates transformed serialized values by default.
-- Column-aware replacement skips `guid` when dump statements include column names. Dsync uses `--complete-insert` for generated dumps.
-- Generated dumps also use `--skip-extended-insert` so the transformer emits row-sized statements instead of holding very large multi-row INSERTs before import progress appears.
+- Flags stay thin; behavior lives in testable functions.
+- `DBProvider` separates orchestration from shell commands.
+- Command construction stays explicit and inspectable.
+- Minimal config selects engines: no replacements -> `none`; WordPress-looking paths -> `go-serialized`; otherwise `raw`.
+- `go-serialized` repairs PHP serialized lengths, preserves `r`/`R` references, validates by default, and skips `guid` when column names exist.
+- Dsync dumps use `--complete-insert` and `--skip-extended-insert` so column-aware streaming stays bounded.

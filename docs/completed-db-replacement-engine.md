@@ -25,4 +25,4 @@ Make database replacement streaming, WordPress-safe, and independent of WP-CLI.
 
 ## Follow-up debt
 
-See [`../tech-debt-tracker.md`](../tech-debt-tracker.md) for remaining command/config improvements.
+See [`tech-debt-tracker.md`](tech-debt-tracker.md) for remaining command/config improvements.

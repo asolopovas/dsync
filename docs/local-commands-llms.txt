@@ -2,16 +2,21 @@ Dsync command reference for agents
 
 Development:
 just setup
-just start
 just run -- --help
 just test
 just test-one TestName
 just vet
 just check
+just check test-race
+just check integration-test
 just bench
-just integration-test
 just install
 just install --stable
+
+Quick private E2E smoke:
+just install
+cd /home/andrius/www/avianese.test/wp-content/themes/avianese-theme
+dsync -a
 
 User commands:
 dsync --gen
@@ -25,9 +30,7 @@ dsync -c ./configs/site.json -d -r --dump
 
 Release:
 just release
-just release --bump patch
-just release --bump minor
-just release --bump major
+just release --bump patch|minor|major
 just release --dry-run --bump patch
 
 Rule: if a just task exists, use it instead of the raw underlying command.

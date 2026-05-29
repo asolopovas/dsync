@@ -1,18 +1,22 @@
-# PLANS
+# Plans
 
-Execution plans preserve multi-turn work, decisions, and partial progress.
+Use prompt-local plans for small work. Check in execution plans for multi-turn, architectural, risky, or decision-heavy work.
 
 ## Index
 
 | Plan | Status |
 | --- | --- |
-| [`docs/exec-plans/completed/db-replacement-engine.md`](docs/exec-plans/completed/db-replacement-engine.md) | Completed |
-| [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md) | Active debt ledger |
+| [`docs/completed-db-replacement-engine.md`](docs/completed-db-replacement-engine.md) | Completed |
+| [`docs/tech-debt-tracker.md`](docs/tech-debt-tracker.md) | Active debt ledger |
 
-## Rules
+## Execution plan shape
 
-- Small tasks stay in the prompt or handoff note.
-- Create a plan when work spans turns, changes architecture, or needs a decision log.
-- Store active plans in `docs/exec-plans/active/`; move finished plans to `docs/exec-plans/completed/`.
-- Each plan needs goal, constraints, tasks, verification, and decision log.
-- Update plans as work lands; do not leave completed work marked open.
+- Goal
+- Scope
+- Acceptance criteria
+- Progress log
+- Decisions made
+- Validation performed
+- Follow-up debt
+
+Name checked-in plans `docs/plan-<topic>.md`; prefix completed plans with `completed-`.

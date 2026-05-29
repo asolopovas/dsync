@@ -1,15 +1,15 @@
-# QUALITY SCORE
+# Quality score
 
-Agent-legibility ledger. Update when a change materially improves or weakens an area.
+Agent-legibility ledger. Update when quality materially changes.
 
-| Area | Grade | Current state | Next improvement |
+| Area | Grade | State | Next |
 | --- | --- | --- | --- |
-| CLI wiring | B | Cobra flags are centralized in `root.go`; dispatch is simple. | Add command-level tests for flag combinations. |
-| File sync | B | Path normalization is tested; rsync construction is small. | Add exclude-argument and reverse-direction tests. |
-| DB orchestration | B- | `DBProvider` enables ordering tests; backup-before-write is covered. | Extract command arg builders with unit tests. |
-| Replacement engine | B | Streaming, column-aware, PHP-serialization-safe path exists with fixtures and benchmarks. | Add more malformed-dump diagnostics and table-level options if needed. |
-| Config | C+ | Schema is documented and small. | Validate required fields and dangerous empty values early. |
-| Verification | B | `just check` is reliable; Docker integration exists. | Add Docker-free command-construction checks. |
-| Docs | B+ | Harness-style map, source docs, plans, and references are compact. | Add a lightweight link/freshness check if drift appears. |
+| CLI wiring | B | Flags are centralized in `root.go`; dispatch is simple. | Add flag-combination tests. |
+| File sync | B | Path normalization is tested; rsync construction is small. | Add exclude and reverse-direction tests. |
+| DB orchestration | B- | `DBProvider` covers ordering and backup-before-write. | Extract command arg builders with tests. |
+| Replacement engine | B | Streaming, column-aware, serialized-safe path has fixtures and benchmarks. | Improve malformed-dump diagnostics. |
+| Config | C+ | Schema is small and documented. | Validate required fields early. |
+| Verification | B | `just check`, race, and Docker integration paths exist. | Add Docker-free command-construction checks. |
+| Docs | B+ | Map, architecture, plans, and references are compact. | Add link/freshness checks if drift appears. |
 
-Debt lives in [`docs/exec-plans/tech-debt-tracker.md`](docs/exec-plans/tech-debt-tracker.md).
+Debt: [`docs/tech-debt-tracker.md`](docs/tech-debt-tracker.md).

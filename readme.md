@@ -1,173 +1,87 @@
 # Dsync
 
-Dsync is a command-line tool written in Go for synchronizing files and databases between local and remote environments. It is designed primarily for web development workflows (e.g., WordPress) but is flexible enough for other use cases. It uses `rsync` for file synchronization and `mysqldump`/`mariadb-dump` for database synchronization.
+Go CLI for syncing web project files and MySQL/MariaDB databases between remote and local environments.
 
-## Features
+- Files: `rsync` over ssh.
+- DB: streamed dump/import with ordered replacements.
+- WordPress: serialized PHP strings are length-repaired; `guid` is skipped by default.
+- Reverse sync: local -> remote, with mandatory remote DB backup.
 
-- **File Synchronization:** Efficient file syncing using `rsync`.
-- **Database Synchronization:** Supports MySQL and MariaDB. Automatically handles database dumps, transfers, and imports.
-- **Search and Replace:** Streams replacements through the database dump, including a Go engine that preserves PHP serialized string lengths for WordPress-style data.
-- **Reverse Sync:** Support for syncing from local to remote environments with automatic remote backups.
-- **Configuration:** Simple JSON configuration file.
-- **SSH Support:** Configurable SSH host and port.
-
-## Prerequisites
-
-- Go 1.20 or later (for building from source).
-- `rsync` installed on both local and remote machines.
-- `mysqldump` or `mariadb-dump` installed on both local and remote machines.
-- SSH access to the remote server.
-
-## Installation
-
-### Using `go install`
+## Install
 
 ```bash
 go install github.com/asolopovas/dsync@latest
 ```
 
-### Building from Source
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/asolopovas/dsync.git
-   cd dsync
-   ```
-
-2. Build the binary:
-   ```bash
-   go build -o dsync main.go
-   ```
-
-3. Move the binary to a directory in your system PATH (e.g., `/usr/local/bin`):
-   ```bash
-   sudo mv dsync /usr/local/bin/
-   ```
-
-## Configuration
-
-Dsync requires a configuration file, typically named `dsync-config.json`. You can generate a default configuration file using the `-g` flag.
+From this repo:
 
 ```bash
-dsync -g
+just install          # dev build to current dsync path
+just install --stable # latest semver tag
 ```
 
-### Configuration File Structure
+## Config
+
+Generate a starter config:
+
+```bash
+dsync --gen
+```
+
+Minimal shape:
 
 ```json
 {
-  "sshHost": "user@remote-host.com",
+  "sshHost": "user@example.com",
   "port": "22",
-  "remote": {
-    "host": "remote-db-host",
-    "db": "remote_db_name"
-  },
-  "local": {
-    "host": "localhost",
-    "db": "local_db_name"
-  },
-  "dbReplace": [
-    {
-      "from": "http://remote-site.com",
-      "to": "http://local-site.test"
-    }
-  ],
-  "sync": [
-    {
-      "remote": "/var/www/html/wp-content/uploads/",
-      "local": "./wp-content/uploads/",
-      "exclude": [
-        "*.log",
-        "cache/"
-      ]
-    }
-  ]
+  "remote": { "host": "unused", "db": "remote_db" },
+  "local": { "host": "unused", "db": "local_db" },
+  "dbReplace": [{ "from": "https://example.com", "to": "http://example.test" }],
+  "sync": [{ "remote": "/var/www/html/wp-content/uploads", "local": "./wp-content/uploads", "exclude": ["cache/"] }]
 }
 ```
 
-- **sshHost**: The SSH connection string (user@host).
-- **port**: The SSH port (default is usually 22).
-- **remote/local**: Database connection settings for remote and local environments.
-- **dbReplace**: List of string replacements to apply to the database dump. Replacement mode is automatic: WordPress-looking paths use serialized-safe replacement, `guid` is skipped by default, and empty replacement lists stream unchanged.
-- **sync**: List of file paths to synchronize. Supports exclude patterns.
+Keep real configs private. See [`docs/sync-and-replacement.md`](docs/sync-and-replacement.md).
 
-## Usage
+## Use
 
-Run `dsync` from the directory containing your configuration file, or specify the path using the `-c` flag.
-
-### Common Commands
-
-**Sync everything (files and database) from remote to local:**
 ```bash
+dsync -a                 # files + DB, remote -> local
+dsync -f                 # files only
+dsync -d                 # DB only
+dsync -a -r              # files + DB, local -> remote
+dsync -d --dump          # import local DB and write db.sql
+dsync -d -r --dump       # import remote DB and write db_reverse.sql
+dsync -c configs/site.json -a
+```
+
+Reverse DB sync backs up remote before import.
+
+## Develop
+
+```bash
+just setup
+just run -- --help
+just check
+just check integration-test
+just install
+```
+
+Private E2E smoke:
+
+```bash
+just install
+cd /home/andrius/www/avianese.test/wp-content/themes/avianese-theme
 dsync -a
 ```
 
-**Sync only files:**
-```bash
-dsync -f
-```
-
-**Sync only database:**
-```bash
-dsync -d
-```
-
-**Reverse sync (Local to Remote):**
-Use the `-r` flag to sync from your local machine to the remote server.
-```bash
-dsync -a -r
-```
-
-**Dump database to file:**
-```bash
-dsync --dump
-```
-
-**Show version:**
-```bash
-dsync -v
-```
-
-### Flags
-
-- `-a`, `--all`: Sync both files and database.
-- `-f`, `--files`: Sync files only.
-- `-d`, `--db`: Sync database only.
-- `-r`, `--reverse`: Reverse sync (Local to Remote).
-- `--dump`: Dump database to a file without importing.
-- `-c`, `--config`: Specify a custom configuration file path (default: `dsync-config.json`).
-- `-g`, `--gen`: Generate a default configuration file.
-- `-v`, `--version`: Display version information.
-
-## Release builds
-
-Build checked dev archives with:
+## Release
 
 ```bash
 just release
+just release --bump patch|minor|major
 ```
-
-Artifacts and `checksums.txt` are written to `releases/dev/`. Stable Go-module releases bump `version`, create/push the semver tag, and update the rolling `latest` tag:
-
-```bash
-just release --bump patch
-just release --bump minor
-just release --bump major
-```
-
-Use `--no-push` for local commit/tags only or `just release --dry-run --bump minor` to preview.
-
-## Benchmark snapshot
-
-Run benchmarks with `go test -bench=Benchmark -benchmem ./...`. On a Ryzen 7 5800X3D/Linux host:
-
-| Benchmark | Throughput | Allocations |
-| --- | ---: | ---: |
-| Raw string replacement | 357 MB/s | 148 KB/op |
-| Raw streaming transformer | 62 MB/s | 693 KB/op |
-| Go serialized transformer | 20 MB/s | 3.97 MB/op |
-| Large Go serialized transformer | 29 MB/s | 18.8 MB/op |
 
 ## License
 
-MIT License
+MIT

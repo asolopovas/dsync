@@ -1,12 +1,11 @@
-# FRONTEND
+# Frontend
 
-Dsync has no web frontend. Its user interface is a CLI with terminal output.
+Dsync has no web frontend. Its UI is terminal output.
 
 ## CLI presentation rules
 
-- Make destructive direction visible: remote -> local or local -> remote.
-- Show which operation is running: files, database, dump, backup, transform, import.
-- During streamed DB work, show the stage and byte counters for dump bytes read and transformed bytes sent.
-- Keep errors actionable; include captured stderr/stdout when available.
-- Do not hide safety-critical details behind decorative terminal UI.
-- Completion generation belongs in `root.go` with other CLI wiring.
+- Show direction before work starts: remote -> local or local -> remote.
+- Name the stage: files, DB dump, backup, transform, import.
+- During DB streaming, show dump bytes read and transformed bytes sent.
+- Include captured stderr/stdout in command errors.
+- Keep safety-critical details visible; pterm decoration must not hide them.
