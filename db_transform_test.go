@@ -141,15 +141,37 @@ func TestTransformSQLDumpSkipsInvalidSerializedWhenValidationDisabled(t *testing
 	}
 }
 
-func TestTransformSQLDumpFailsInvalidSerializedWhenValidationEnabled(t *testing.T) {
-	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";');"
+func TestTransformSQLDumpSkipsInvalidSerializedWhenValidationEnabled(t *testing.T) {
+	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";'),('plain','https://example.com');"
+	want := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:5:\"abc\";'),('plain','http://local.test');"
 
-	_, err := transformStringForTest(input, ReplacementOptions{
+	got, err := transformStringForTest(input, ReplacementOptions{
 		Engine:             DBReplaceEngineGoSerialized,
 		ValidateSerialized: true,
+		Replacements:       []DBReplace{{From: "https://example.com", To: "http://local.test"}},
 	})
-	if err == nil {
-		t.Fatal("expected invalid serialized error")
+	if err != nil {
+		t.Fatalf("TransformSQLDump failed: %v", err)
+	}
+	if got != want {
+		t.Fatalf("unexpected SQL\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
+func TestTransformSQLDumpSkipsInvalidSerializedWhenValidationEnabledAndReplacementMatches(t *testing.T) {
+	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('bad','s:25:\"https://example.com\";');"
+	want := input
+
+	got, err := transformStringForTest(input, ReplacementOptions{
+		Engine:             DBReplaceEngineGoSerialized,
+		ValidateSerialized: true,
+		Replacements:       []DBReplace{{From: "https://example.com", To: "http://local.test"}},
+	})
+	if err != nil {
+		t.Fatalf("TransformSQLDump failed: %v", err)
+	}
+	if got != want {
+		t.Fatalf("unexpected SQL\ngot:  %s\nwant: %s", got, want)
 	}
 }
 

@@ -130,7 +130,7 @@ func (r *closeSignalReadCloser) Close() error {
 }
 
 func TestWriteTransformedDumpStopsDumpOnTransformError(t *testing.T) {
-	reader := newCloseSignalReadCloser("INSERT INTO t (`v`) VALUES ('s:5:\"abc\";');")
+	reader := newCloseSignalReadCloser("INSERT INTO t (`v`) VALUES ('x';")
 	dump := &DBDump{
 		Reader: reader,
 		Wait: func() error {
@@ -143,11 +143,10 @@ func TestWriteTransformedDumpStopsDumpOnTransformError(t *testing.T) {
 		},
 	}
 
-	validateSerialized := true
 	err := writeTransformedDump(
 		context.Background(),
 		dump,
-		&Config{DBReplaceEngine: DBReplaceEngineGoSerialized, ValidateSerialized: &validateSerialized},
+		&Config{DBReplaceEngine: DBReplaceEngineGoSerialized},
 		nil,
 		false,
 		"db.sql",
@@ -160,7 +159,7 @@ func TestWriteTransformedDumpStopsDumpOnTransformError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected transform error")
 	}
-	if !strings.Contains(err.Error(), "transform table") {
+	if !strings.Contains(err.Error(), "parse INSERT values") {
 		t.Fatalf("expected transform error, got %v", err)
 	}
 }

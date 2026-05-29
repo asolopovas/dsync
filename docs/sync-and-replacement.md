@@ -37,4 +37,5 @@ Legacy configs may override `dbReplaceEngine`, `validateSerialized`, or `skipCol
 
 - Column skipping needs complete INSERT column names; Dsync dumps include them.
 - DB credentials and service names are code conventions, not config fields.
-- Validation failures report table/row/column. Disabling validation risks corrupted serialized data.
+- Invalid pre-existing serialized values pass through unchanged; Dsync avoids raw-editing data it cannot repair.
+- Validation failures report table/row/column when a parsed transformed value becomes invalid. Disabling validation risks corrupted serialized data.

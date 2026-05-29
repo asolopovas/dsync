@@ -409,9 +409,6 @@ func transformSQLString(value string, options ReplacementOptions) (string, error
 	if isSerializedPHP(value) {
 		transformed, err := transformSerializedPHP(value, options.Replacements)
 		if err != nil {
-			if options.ValidateSerialized {
-				return "", err
-			}
 			return value, nil
 		}
 		if options.ValidateSerialized && isSerializedPHP(transformed) {
