@@ -60,7 +60,7 @@ func TestTransformSQLDump(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := transformStringForTest(tt.input, tt.options)
+			got, err := transformSQLForTest(tt.input, tt.options)
 			if err != nil {
 				t.Fatalf("TransformSQLDump failed: %v", err)
 			}
@@ -74,7 +74,7 @@ func TestTransformSQLDumpNestedSerializedString(t *testing.T) {
 	serialized := fmt.Sprintf(`a:1:{s:6:"nested";s:%d:"%s";}`, len([]byte(nested)), nested)
 	input := "INSERT INTO `wp_options` (`option_name`,`option_value`) VALUES ('plugin','" + strings.ReplaceAll(serialized, "'", `\\'`) + "');"
 
-	got, err := transformStringForTest(input, goSerializedOptionsForTest(false))
+	got, err := transformSQLForTest(input, goSerializedOptionsForTest(false))
 	if err != nil {
 		t.Fatalf("TransformSQLDump failed: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestWordPressLikeFixtureTransform(t *testing.T) {
 		t.Fatalf("read fixture: %v", err)
 	}
 
-	got, err := transformStringForTest(string(data), goSerializedOptionsForTest(true, "guid"))
+	got, err := transformSQLForTest(string(data), goSerializedOptionsForTest(true, "guid"))
 	if err != nil {
 		t.Fatalf("TransformSQLDump failed: %v", err)
 	}

@@ -25,10 +25,12 @@ func goSerializedOptionsForTest(validateSerialized bool, skipColumns ...string) 
 	}
 }
 
-func transformStringForTest(input string, options ReplacementOptions) (string, error) {
+func transformSQLForTest(input string, options ReplacementOptions) (string, error) {
 	var output bytes.Buffer
-	err := TransformSQLDump(strings.NewReader(input), &output, options)
-	return output.String(), err
+	if err := TransformSQLDump(strings.NewReader(input), &output, options); err != nil {
+		return "", err
+	}
+	return output.String(), nil
 }
 
 func readStringForTest(t *testing.T, reader io.Reader) string {
