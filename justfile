@@ -64,7 +64,7 @@ check *jobs:
 
 [private]
 fmt:
-    gofmt -w $(git ls-files '*.go')
+    git ls-files -z '*.go' | while IFS= read -r -d '' file; do [ ! -f "$file" ] || printf '%s\0' "$file"; done | xargs -0 gofmt -w
 
 [private]
 vet:

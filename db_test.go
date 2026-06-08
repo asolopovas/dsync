@@ -1,37 +1,32 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 )
 
-func escapeLevel(url string, level int) string {
-	switch level {
-	case 1:
-		return strings.ReplaceAll(url, "/", `\/`)
-	case 2:
-		return strings.ReplaceAll(url, "/", `\\/`)
-	case 3:
-		return strings.ReplaceAll(url, "/", `\\\/`)
-	case 4:
-		return strings.ReplaceAll(url, "/", `\\\\/`)
-	case 5:
-		return strings.ReplaceAll(url, "/", `\\\\\/`)
-	default:
+func escapedURL(url string, level int) string {
+	slash := map[int]string{
+		1: `\/`,
+		2: `\\/`,
+		3: `\\\/`,
+		4: `\\\\/`,
+	}[level]
+	if slash == "" {
 		return url
 	}
-}
-
-type testCase struct {
-	name         string
-	sql          string
-	replacements []DBReplace
-	want         string
+	return strings.ReplaceAll(url, "/", slash)
 }
 
 func TestApplyDBReplacements(t *testing.T) {
-	tests := []testCase{
+	tests := []struct {
+		name         string
+		sql          string
+		replacements []DBReplace
+		want         string
+	}{
 		{
 			name:         "single replacement",
 			sql:          "INSERT INTO users VALUES ('http://example.com');",
@@ -47,7 +42,7 @@ func TestApplyDBReplacements(t *testing.T) {
 		{
 			name:         "no replacements",
 			sql:          "INSERT INTO users VALUES ('http://example.com');",
-			replacements: []DBReplace{},
+			replacements: nil,
 			want:         "INSERT INTO users VALUES ('http://example.com');",
 		},
 		{
@@ -61,26 +56,32 @@ func TestApplyDBReplacements(t *testing.T) {
 	for _, level := range []int{1, 2, 3, 4} {
 		from := "http://example.com"
 		to := "http://some.domain.com"
-		tests = append(tests, testCase{
-			name:         fmt.Sprintf("escaped slashes (level %d) - domain only", level),
-			sql:          fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapeLevel(from, level)),
+		tests = append(tests, struct {
+			name         string
+			sql          string
+			replacements []DBReplace
+			want         string
+		}{
+			name:         fmt.Sprintf("escaped slashes level %d", level),
+			sql:          fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapedURL(from, level)),
 			replacements: []DBReplace{{From: "example.com", To: "some.domain.com"}},
-			want:         fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapeLevel(to, level)),
+			want:         fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapedURL(to, level)),
 		})
 	}
 
 	for _, level := range []int{0, 1, 2} {
 		from := "https://some.domain.com"
 		to := "http://local.test"
-		levelName := "normal"
-		if level > 0 {
-			levelName = fmt.Sprintf("level %d", level)
-		}
-		tests = append(tests, testCase{
-			name:         fmt.Sprintf("full URL with protocol - %s", levelName),
-			sql:          fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapeLevel(from, level)),
+		tests = append(tests, struct {
+			name         string
+			sql          string
+			replacements []DBReplace
+			want         string
+		}{
+			name:         fmt.Sprintf("full URL level %d", level),
+			sql:          fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapedURL(from, level)),
 			replacements: []DBReplace{{From: from, To: to}},
-			want:         fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapeLevel(to, level)),
+			want:         fmt.Sprintf("INSERT INTO options VALUES ('siteurl', '%s');", escapedURL(to, level)),
 		})
 	}
 
@@ -88,6 +89,32 @@ func TestApplyDBReplacements(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ApplyDBReplacements(tt.sql, tt.replacements); got != tt.want {
 				t.Errorf("ApplyDBReplacements() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestApplyDBReplacementsHandlesEscapedConfigValues(t *testing.T) {
+	var escapedConfig []DBReplace
+	configJSON := `[{"from":"https:\\/\\/example.com","to":"http:\\/\\/example.test"}]`
+	if err := json.Unmarshal([]byte(configJSON), &escapedConfig); err != nil {
+		t.Fatalf("unmarshal escaped config: %v", err)
+	}
+
+	dump := `Some content "https:\/\/example.com" end`
+	want := `Some content "http:\/\/example.test" end`
+	tests := []struct {
+		name         string
+		replacements []DBReplace
+	}{
+		{"escaped config", escapedConfig},
+		{"plain config", []DBReplace{{From: "https://example.com", To: "http://example.test"}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ApplyDBReplacements(dump, tt.replacements); got != want {
+				t.Fatalf("ApplyDBReplacements() = %s, want %s", got, want)
 			}
 		})
 	}

@@ -6,18 +6,29 @@ import (
 	"testing"
 )
 
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
 func TestApplyFileReplacementsUpdatesTextFilesOnly(t *testing.T) {
 	tmp := t.TempDir()
-
 	cssPath := filepath.Join(tmp, "style.css")
-	if err := os.WriteFile(cssPath, []byte("body{background:url(https://example.com/image.jpg)}"), 0644); err != nil {
-		t.Fatalf("write css fixture: %v", err)
-	}
-
 	fontPath := filepath.Join(tmp, "font.woff2")
-	if err := os.WriteFile(fontPath, []byte("https://example.com"), 0644); err != nil {
-		t.Fatalf("write binary fixture: %v", err)
-	}
+
+	writeTestFile(t, cssPath, "body{background:url(https://example.com/image.jpg)}")
+	writeTestFile(t, fontPath, "https://example.com")
 
 	changed, err := applyFileReplacements(tmp, []DBReplace{{From: "https://example.com", To: "http://example.test"}})
 	if err != nil {
@@ -26,20 +37,10 @@ func TestApplyFileReplacementsUpdatesTextFilesOnly(t *testing.T) {
 	if changed != 1 {
 		t.Fatalf("applyFileReplacements() changed = %d, want 1", changed)
 	}
-
-	css, err := os.ReadFile(cssPath)
-	if err != nil {
-		t.Fatalf("read css result: %v", err)
-	}
-	if got, want := string(css), "body{background:url(http://example.test/image.jpg)}"; got != want {
+	if got, want := readTestFile(t, cssPath), "body{background:url(http://example.test/image.jpg)}"; got != want {
 		t.Fatalf("css result = %q, want %q", got, want)
 	}
-
-	font, err := os.ReadFile(fontPath)
-	if err != nil {
-		t.Fatalf("read binary result: %v", err)
-	}
-	if got, want := string(font), "https://example.com"; got != want {
+	if got, want := readTestFile(t, fontPath), "https://example.com"; got != want {
 		t.Fatalf("binary result = %q, want %q", got, want)
 	}
 }

@@ -35,12 +35,7 @@ func TestWordPressFixtureImportsIntoMariaDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	transformed, err := transformStringForTest(string(data), ReplacementOptions{
-		Engine:             DBReplaceEngineGoSerialized,
-		ValidateSerialized: true,
-		Replacements:       []DBReplace{{From: "https://example.com", To: "http://local.test"}},
-		SkipColumns:        []string{"guid"},
-	})
+	transformed, err := transformStringForTest(string(data), goSerializedOptionsForTest(true, "guid"))
 	if err != nil {
 		t.Fatalf("transform fixture: %v", err)
 	}
