@@ -28,6 +28,7 @@ type SyncPath struct {
 	Remote  string   `json:"remote"`
 	Local   string   `json:"local"`
 	Exclude []string `json:"exclude"`
+	Replace bool     `json:"replace,omitempty"`
 }
 
 type DBReplace struct {

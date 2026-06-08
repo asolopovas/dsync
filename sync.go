@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/pterm/pterm"
@@ -38,12 +40,15 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 			{Level: 0, Text: msg, TextStyle: pterm.NewStyle(pterm.FgCyan)},
 		}).Render()
 
-		if len(item.Exclude) > 0 {
-			var excludes []pterm.BulletListItem
-			for _, v := range item.Exclude {
-				excludes = append(excludes, pterm.BulletListItem{Level: 1, Text: "Exclude: " + v, TextStyle: pterm.NewStyle(pterm.FgGray)})
-			}
-			pterm.DefaultBulletList.WithItems(excludes).Render()
+		var details []pterm.BulletListItem
+		for _, v := range item.Exclude {
+			details = append(details, pterm.BulletListItem{Level: 1, Text: "Exclude: " + v, TextStyle: pterm.NewStyle(pterm.FgGray)})
+		}
+		if item.Replace {
+			details = append(details, pterm.BulletListItem{Level: 1, Text: "Replace synced text file URLs", TextStyle: pterm.NewStyle(pterm.FgGray)})
+		}
+		if len(details) > 0 {
+			pterm.DefaultBulletList.WithItems(details).Render()
 		}
 
 		spinner, _ := pterm.DefaultSpinner.Start("Running rsync...")
@@ -51,6 +56,16 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 			spinner.Fail(fmt.Sprintf("Rsync failed: %v", err))
 		} else {
 			spinner.Success("Rsync completed")
+		}
+
+		if item.Replace && !reverse && len(cfg.DBReplace) > 0 {
+			spinner, _ := pterm.DefaultSpinner.Start("Applying replacements to synced text files...")
+			changed, err := applyFileReplacements(localPath, cfg.DBReplace)
+			if err != nil {
+				spinner.Fail(fmt.Sprintf("File replacements failed: %v", err))
+				return err
+			}
+			spinner.Success(fmt.Sprintf("Updated %d synced text files", changed))
 		}
 		fmt.Println()
 	}
@@ -88,4 +103,61 @@ func ensureTrailingSlash(s string) string {
 		return s
 	}
 	return s + "/"
+}
+
+func applyFileReplacements(root string, replacements []DBReplace) (int, error) {
+	if len(replacements) == 0 {
+		return 0, nil
+	}
+
+	changed := 0
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !isTextReplacementCandidate(path) {
+			return nil
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		original := string(data)
+		updated := applyStringReplacements(original, replacements)
+		if updated == original {
+			return nil
+		}
+
+		if err := os.WriteFile(path, []byte(updated), info.Mode().Perm()); err != nil {
+			return err
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			return err
+		}
+		changed++
+		return nil
+	})
+	if err != nil {
+		return changed, fmt.Errorf("apply replacements under %s: %w", root, err)
+	}
+
+	return changed, nil
+}
+
+func isTextReplacementCandidate(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".css", ".js", ".json", ".html", ".htm", ".svg", ".xml", ".txt", ".map", ".php", ".twig":
+		return true
+	default:
+		return false
+	}
 }

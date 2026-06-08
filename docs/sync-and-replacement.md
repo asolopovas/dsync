@@ -11,7 +11,7 @@ Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
   "remote": { "host": "unused", "db": "remote_db" },
   "local": { "host": "unused", "db": "local_db" },
   "dbReplace": [{ "from": "https://example.com", "to": "http://example.test" }],
-  "sync": [{ "remote": "/var/www/html/wp-content/uploads", "local": "./wp-content/uploads", "exclude": ["cache/", "*.log"] }]
+  "sync": [{ "remote": "/var/www/html/wp-content/uploads", "local": "./wp-content/uploads", "exclude": ["cache/", "*.log"], "replace": true }]
 }
 ```
 
@@ -21,6 +21,7 @@ Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
 
 - Forward DB sync: `from -> to` in listed order.
 - Reverse DB sync: `to -> from` in reverse list order.
+- Forward file sync: when `sync[].replace` is true, Dsync applies `from -> to` to synced text files after rsync. Use this for generated WordPress CSS/JS that contains absolute remote URLs.
 - Use clean URL/path values; engines also handle slash-escaped variants such as `\/`.
 
 ## Engines

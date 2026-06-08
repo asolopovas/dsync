@@ -11,6 +11,7 @@ Fields:
 - dbReplace: ordered {from,to} list; empty means stream DB unchanged.
 - sync[].remote/local: directory endpoints; trailing slash normalization is required.
 - sync[].exclude: rsync --exclude patterns.
+- sync[].replace: optional bool. When true on forward sync, apply dbReplace values to text files (.css/.js/.json/.html/.svg/.xml/.txt/.map/.php/.twig) after rsync. Use for generated WordPress asset CSS that contains absolute remote URLs.
 
 Forward replacements: from -> to in listed order.
 Reverse replacements: to -> from in reverse list order.
