@@ -3,14 +3,22 @@ package main
 import (
 	"bytes"
 	"io"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/pterm/pterm"
 )
 
 const (
 	remoteURLForTest = "https://example.com"
 	localURLForTest  = "http://local.test"
 )
+
+func TestMain(m *testing.M) {
+	pterm.DisableOutput()
+	os.Exit(m.Run())
+}
 
 func urlReplacementForTest() []DBReplace {
 	return []DBReplace{{From: remoteURLForTest, To: localURLForTest}}

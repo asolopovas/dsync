@@ -119,3 +119,29 @@ func TestApplyDBReplacementsHandlesEscapedConfigValues(t *testing.T) {
 		})
 	}
 }
+
+func TestMySQLDumpFlagsUseExtendedInserts(t *testing.T) {
+	flags := make(map[string]bool)
+	for _, flag := range mysqlDumpFlags() {
+		flags[flag] = true
+	}
+
+	for _, required := range []string{"--complete-insert", "--extended-insert"} {
+		if !flags[required] {
+			t.Errorf("mysqlDumpFlags() missing %q", required)
+		}
+	}
+	if flags["--skip-extended-insert"] {
+		t.Error("mysqlDumpFlags() disables extended inserts")
+	}
+}
+
+func TestStartSpinnerHonorsDisabledOutput(t *testing.T) {
+	spinner := startSpinner("quiet test")
+	if spinner.IsActive {
+		t.Fatal("startSpinner() started live output while pterm output is disabled")
+	}
+	if spinner.Text != "quiet test" {
+		t.Fatalf("startSpinner() text = %q, want %q", spinner.Text, "quiet test")
+	}
+}

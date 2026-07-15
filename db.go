@@ -43,7 +43,7 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 
 	pterm.DefaultSection.Println("Syncing Database (remote to local)")
 
-	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Stage 1/3: starting remote database dump '%s'...", cfg.Remote.DB))
+	spinner := startSpinner(fmt.Sprintf("Stage 1/3: starting remote database dump '%s'...", cfg.Remote.DB))
 	dump, err := provider.DumpRemote(ctx)
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Stage 1/3 failed: remote database dump: %v", err))
@@ -53,7 +53,7 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 
 	progress := &dbStreamProgress{}
 	label := fmt.Sprintf("DB 2/3 transform (%s) + 3/3 import local '%s'", ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, cfg.Local.DB)
-	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
+	spinner = startSpinner(label + "...")
 	stopProgress := startDBProgress(ctx, spinner, label, progress)
 	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal, progress); err != nil {
 		stopProgress()
@@ -69,7 +69,7 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
 	pterm.DefaultSection.Println("Syncing Database (local to remote)")
 
-	spinner, _ := pterm.DefaultSpinner.Start(fmt.Sprintf("Stage 1/4: starting local database dump '%s'...", cfg.Local.DB))
+	spinner := startSpinner(fmt.Sprintf("Stage 1/4: starting local database dump '%s'...", cfg.Local.DB))
 	dump, err := provider.DumpLocal(ctx)
 	if err != nil {
 		spinner.Fail(fmt.Sprintf("Stage 1/4 failed: local database dump: %v", err))
@@ -83,7 +83,7 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
 
-	spinner, _ = pterm.DefaultSpinner.Start("Stage 2/4: backing up remote database before import...")
+	spinner = startSpinner("Stage 2/4: backing up remote database before import...")
 	if err := provider.BackupRemote(ctx); err != nil {
 		_ = dump.Reader.Close()
 		spinner.Fail(fmt.Sprintf("Stage 2/4 failed: remote database backup: %v", err))
@@ -93,7 +93,7 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 
 	progress := &dbStreamProgress{}
 	label := fmt.Sprintf("DB 3/4 reverse transform (%s) + 4/4 import remote '%s'", ReplacementOptionsFromConfig(cfg, reversedReplacements).Engine, cfg.Remote.DB)
-	spinner, _ = pterm.DefaultSpinner.Start(label + "...")
+	spinner = startSpinner(label + "...")
 	stopProgress := startDBProgress(ctx, spinner, label, progress)
 	if err := writeTransformedDump(ctx, dump, cfg, reversedReplacements, dumpDB, "db_reverse.sql", provider.WriteRemote, progress); err != nil {
 		stopProgress()
@@ -442,7 +442,7 @@ func mysqlDumpFlags() []string {
 		"--quick",
 		"--hex-blob",
 		"--complete-insert",
-		"--skip-extended-insert",
+		"--extended-insert",
 		"--default-character-set=utf8mb4",
 	}
 }

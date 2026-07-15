@@ -51,7 +51,7 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 			pterm.DefaultBulletList.WithItems(details).Render()
 		}
 
-		spinner, _ := pterm.DefaultSpinner.Start("Running rsync...")
+		spinner := startSpinner("Running rsync...")
 		if err := runRsync(ctx, cfg, item, remotePath, localPath, reverse); err != nil {
 			spinner.Fail(fmt.Sprintf("Rsync failed: %v", err))
 		} else {
@@ -59,7 +59,7 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 		}
 
 		if item.Replace && !reverse && len(cfg.DBReplace) > 0 {
-			spinner, _ := pterm.DefaultSpinner.Start("Applying replacements to synced text files...")
+			spinner := startSpinner("Applying replacements to synced text files...")
 			changed, err := applyFileReplacements(localPath, cfg.DBReplace)
 			if err != nil {
 				spinner.Fail(fmt.Sprintf("File replacements failed: %v", err))

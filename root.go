@@ -21,6 +21,20 @@ func Execute() {
 	}
 }
 
+func startSpinner(text string) *pterm.SpinnerPrinter {
+	spinner := pterm.DefaultSpinner
+	spinner.Text = text
+	if !pterm.Output {
+		return &spinner
+	}
+
+	started, err := spinner.Start(text)
+	if err != nil {
+		return &spinner
+	}
+	return started
+}
+
 func newRootCmd() *cobra.Command {
 	var (
 		syncFilesAndDB bool

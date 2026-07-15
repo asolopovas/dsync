@@ -52,4 +52,4 @@ DB reverse:
 - Command construction stays explicit and inspectable.
 - Minimal config selects engines: no replacements -> `none`; WordPress-looking paths -> `go-serialized`; otherwise `raw`.
 - `go-serialized` repairs PHP serialized lengths, preserves `r`/`R` references, validates by default, and skips `guid` when column names exist.
-- Dsync dumps use `--complete-insert` and `--skip-extended-insert` so column-aware streaming stays bounded.
+- Dsync dumps use `--complete-insert` and `--extended-insert` so replacements remain column-aware while database imports avoid one statement per row.

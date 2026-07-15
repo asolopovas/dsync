@@ -80,7 +80,7 @@ test-one pattern *args:
 
 [private]
 test-race *args:
-    go test -race {{_test_packages}} {{args}}
+    CGO_ENABLED=1 go test -race {{_test_packages}} {{args}}
 
 [private]
 integration-test *args:
