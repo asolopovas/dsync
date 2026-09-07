@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -25,10 +26,13 @@ type DBProvider interface {
 	WriteRemote(ctx context.Context, sql io.Reader) error
 	WriteLocal(ctx context.Context, sql io.Reader) error
 	BackupRemote(ctx context.Context) error
+	PreflightLocalCache(ctx context.Context, wordpressRoots []string) error
+	FlushLocalCache(ctx context.Context, wordpressRoots []string) error
 }
 
 type RealDBProvider struct {
-	cfg *Config
+	cfg          *Config
+	wpExecutable string
 }
 
 func NewRealDBProvider(cfg *Config) *RealDBProvider {
@@ -42,28 +46,83 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 	}
 
 	pterm.DefaultSection.Println("Syncing Database (remote to local)")
+	wordpressRoots, err := localWordPressRoots(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to discover local WordPress roots: %w", err)
+	}
 
-	spinner := startSpinner(fmt.Sprintf("Stage 1/3: starting remote database dump '%s'...", cfg.Remote.DB))
+	stageCount := 3
+	if len(wordpressRoots) > 0 {
+		stageCount = 4
+		spinner := startSpinner("Preflight: checking local WordPress cache invalidation...")
+		if err := provider.PreflightLocalCache(ctx, wordpressRoots); err != nil {
+			spinner.Fail(fmt.Sprintf("Preflight failed before local database import: %v", err))
+			return fmt.Errorf("WordPress cache preflight failed before local database import: %w", err)
+		}
+		spinner.Success(fmt.Sprintf("Preflight complete: WordPress cache invalidation ready for %d site(s)", len(wordpressRoots)))
+	}
+
+	spinner := startSpinner(fmt.Sprintf("Stage 1/%d: starting remote database dump '%s'...", stageCount, cfg.Remote.DB))
 	dump, err := provider.DumpRemote(ctx)
 	if err != nil {
-		spinner.Fail(fmt.Sprintf("Stage 1/3 failed: remote database dump: %v", err))
+		spinner.Fail(fmt.Sprintf("Stage 1/%d failed: remote database dump: %v", stageCount, err))
 		return fmt.Errorf("failed to dump remote db: %w", err)
 	}
-	spinner.Success(fmt.Sprintf("Stage 1/3 complete: remote dump stream started for '%s'", cfg.Remote.DB))
+	spinner.Success(fmt.Sprintf("Stage 1/%d complete: remote dump stream started for '%s'", stageCount, cfg.Remote.DB))
 
 	progress := &dbStreamProgress{}
-	label := fmt.Sprintf("DB 2/3 transform (%s) + 3/3 import local '%s'", ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, cfg.Local.DB)
+	label := fmt.Sprintf("DB 2/%d transform (%s) + 3/%d import local '%s'", stageCount, ReplacementOptionsFromConfig(cfg, cfg.DBReplace).Engine, stageCount, cfg.Local.DB)
 	spinner = startSpinner(label + "...")
 	stopProgress := startDBProgress(ctx, spinner, label, progress)
 	if err := writeTransformedDump(ctx, dump, cfg, cfg.DBReplace, dumpDB, "db.sql", provider.WriteLocal, progress); err != nil {
 		stopProgress()
-		spinner.Fail(fmt.Sprintf("Stage 2/3 + 3/3 failed: local database import: %v", err))
+		spinner.Fail(fmt.Sprintf("Stage 2/%d + 3/%d failed: local database import: %v", stageCount, stageCount, err))
 		return fmt.Errorf("failed to write to local db: %w", err)
 	}
 	stopProgress()
-	spinner.Success(fmt.Sprintf("Stage 3/3 complete: wrote %s to local database '%s'", formatBytes(progress.outputBytes.Load()), cfg.Local.DB))
+	spinner.Success(fmt.Sprintf("Stage 3/%d complete: wrote %s to local database '%s'", stageCount, formatBytes(progress.outputBytes.Load()), cfg.Local.DB))
+
+	if len(wordpressRoots) > 0 {
+		spinner = startSpinner(fmt.Sprintf("Stage 4/4: invalidating WordPress object cache for %d site(s)...", len(wordpressRoots)))
+		if err := provider.FlushLocalCache(ctx, wordpressRoots); err != nil {
+			spinner.Fail(fmt.Sprintf("Stage 4/4 failed: database imported successfully, but WordPress cache invalidation failed: %v", err))
+			return fmt.Errorf("local database '%s' imported successfully, but WordPress cache invalidation failed: %w", cfg.Local.DB, err)
+		}
+		spinner.Success(fmt.Sprintf("Stage 4/4 complete: invalidated WordPress object cache for %d site(s)", len(wordpressRoots)))
+	}
 
 	return nil
+}
+
+func localWordPressRoots(cfg *Config) ([]string, error) {
+	roots := make([]string, 0, len(cfg.Sync))
+	seen := make(map[string]struct{}, len(cfg.Sync))
+
+	for _, syncPath := range cfg.Sync {
+		path := filepath.Clean(syncPath.Local)
+		for {
+			if strings.EqualFold(filepath.Base(path), "wp-content") {
+				root, err := filepath.Abs(filepath.Dir(path))
+				if err != nil {
+					return nil, fmt.Errorf("resolve WordPress root from %q: %w", syncPath.Local, err)
+				}
+				root = filepath.Clean(root)
+				if _, exists := seen[root]; !exists {
+					seen[root] = struct{}{}
+					roots = append(roots, root)
+				}
+				break
+			}
+
+			parent := filepath.Dir(path)
+			if parent == path {
+				break
+			}
+			path = parent
+		}
+	}
+
+	return roots, nil
 }
 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
@@ -401,6 +460,61 @@ func (p *RealDBProvider) BackupRemote(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("ssh backup command failed: %s: %w", string(output), err)
 	}
+	return nil
+}
+
+func (p *RealDBProvider) PreflightLocalCache(ctx context.Context, wordpressRoots []string) error {
+	for _, root := range wordpressRoots {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		info, err := os.Stat(root)
+		if err != nil {
+			return fmt.Errorf("local WordPress root %q is unavailable: %w", root, err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("local WordPress root %q is not a directory", root)
+		}
+
+		wpLoadPath := filepath.Join(root, "wp-load.php")
+		info, err = os.Stat(wpLoadPath)
+		if err != nil {
+			return fmt.Errorf("local WordPress root %q is invalid: %s is unavailable: %w", root, wpLoadPath, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("local WordPress root %q is invalid: %s is not a file", root, wpLoadPath)
+		}
+	}
+
+	wpExecutable, err := exec.LookPath("wp")
+	if err != nil {
+		return fmt.Errorf("WP-CLI executable 'wp' is unavailable: %w", err)
+	}
+	p.wpExecutable = wpExecutable
+	return nil
+}
+
+func (p *RealDBProvider) FlushLocalCache(ctx context.Context, wordpressRoots []string) error {
+	if p.wpExecutable == "" {
+		return fmt.Errorf("WP-CLI cache flush was not preflighted")
+	}
+
+	for _, root := range wordpressRoots {
+		args := []string{
+			"--path=" + root,
+			"--skip-plugins",
+			"--skip-themes",
+			"--quiet",
+			"cache", "flush",
+		}
+		cmd := exec.CommandContext(ctx, p.wpExecutable, args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("WP-CLI cache flush failed for %q: %s: %w", root, strings.TrimSpace(string(output)), err)
+		}
+	}
+
 	return nil
 }
 

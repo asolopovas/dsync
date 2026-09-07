@@ -24,6 +24,12 @@ Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
 - Forward file sync: when `sync[].replace` is true, Dsync applies `from -> to` to synced text files after rsync. Use this for generated WordPress CSS/JS that contains absolute remote URLs.
 - Use clean URL/path values; engines also handle slash-escaped variants such as `\/`.
 
+## WordPress object cache
+
+For a forward database sync, Dsync derives local WordPress roots from `sync[].local` paths containing a `wp-content` directory. Duplicate roots are processed once. Before the remote dump starts, Dsync verifies that every root exists with `wp-load.php` and that WP-CLI is available.
+
+After a successful local import, Dsync runs `wp --path=<root> --skip-plugins --skip-themes --quiet cache flush` for each root. This invalidates the site's WordPress object cache without flushing Redis globally. A failure is fatal and reports that the database was already imported. Reverse syncs, file-only syncs, and configurations without local WordPress paths do not run this stage.
+
 ## Engines
 
 | Engine | Selected when | Behavior |
@@ -38,5 +44,6 @@ Legacy configs may override `dbReplaceEngine`, `validateSerialized`, or `skipCol
 
 - Column skipping needs complete INSERT column names; Dsync dumps include them.
 - DB credentials and service names are code conventions, not config fields.
+- WP-CLI is a runtime dependency only for forward WordPress database syncs; there are no cache-related flags or config fields.
 - Invalid pre-existing serialized values pass through unchanged; Dsync avoids raw-editing data it cannot repair.
 - Validation failures report table/row/column when a parsed transformed value becomes invalid. Disabling validation risks corrupted serialized data.

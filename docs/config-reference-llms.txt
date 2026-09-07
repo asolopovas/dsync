@@ -13,6 +13,13 @@ Fields:
 - sync[].exclude: rsync --exclude patterns.
 - sync[].replace: optional bool. When true on forward sync, apply dbReplace values to text files (.css/.js/.json/.html/.svg/.xml/.txt/.map/.php/.twig) after rsync. Use for generated WordPress asset CSS that contains absolute remote URLs.
 
+Forward WordPress DB cache behavior:
+- Dsync derives and deduplicates WordPress roots from sync[].local paths containing a wp-content directory.
+- Before import, every root must exist with wp-load.php and wp must be available on PATH.
+- After a successful import, Dsync runs a site-scoped WP-CLI object-cache flush once per root.
+- Reverse, file-only, and non-WordPress syncs do not flush caches.
+- There are no cache flags or config fields.
+
 Forward replacements: from -> to in listed order.
 Reverse replacements: to -> from in reverse list order.
 

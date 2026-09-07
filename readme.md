@@ -4,7 +4,7 @@ Go CLI for syncing web project files and MySQL/MariaDB databases between remote 
 
 - Files: `rsync` over ssh.
 - DB: streamed dump/import with ordered replacements.
-- WordPress: serialized PHP strings are length-repaired; `guid` is skipped by default.
+- WordPress: serialized PHP strings are length-repaired, `guid` is skipped by default, and forward DB syncs finish with a site-scoped object-cache flush.
 - Reverse sync: local -> remote, with mandatory remote DB backup.
 
 ## Install
@@ -56,6 +56,8 @@ dsync -c configs/site.json -a
 ```
 
 Reverse DB sync backs up remote before import.
+
+Forward WordPress DB sync requires WP-CLI on `PATH`. Dsync discovers local WordPress roots from configured `sync[].local` `wp-content` paths, checks them before import, and flushes each site's object cache afterward. Cache failure is fatal but does not roll back the completed database import.
 
 ## Develop
 

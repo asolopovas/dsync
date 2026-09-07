@@ -18,6 +18,7 @@ Dsync is a single-package Go CLI. It syncs directories with `rsync` and streams 
 ## Runtime dependencies
 
 - Local: `ssh`, `rsync`, Go, Docker Compose with `mariadb` service for DB import.
+- Local WordPress forward DB syncs: WP-CLI (`wp`) and a valid WordPress root derived from each `sync[].local` path containing `wp-content`.
 - Remote: `rsync`, `mysqldump`, `mysql`, root DB access without interactive prompts.
 - Compose file: `$HOME/www/dev/docker-compose.yml`, override with `DSYNC_COMPOSE_FILE`.
 - Local MariaDB root password convention: `secret`.
@@ -32,10 +33,12 @@ Files:
 
 DB forward:
 
-1. Remote `mysqldump -uroot` streams over ssh.
-2. Transformer applies configured replacements while progress counts read/sent bytes.
-3. Local Docker MariaDB creates DB/user if needed and imports.
-4. `--dump` tees transformed SQL to `db.sql`.
+1. WordPress-looking local sync paths are resolved to deduplicated site roots, then each root and WP-CLI are checked before the database is replaced.
+2. Remote `mysqldump -uroot` streams over ssh.
+3. Transformer applies configured replacements while progress counts read/sent bytes.
+4. Local Docker MariaDB creates DB/user if needed and imports.
+5. For WordPress sites, WP-CLI flushes each site's object cache after a successful import with plugins and themes skipped.
+6. `--dump` tees transformed SQL to `db.sql`.
 
 DB reverse:
 
@@ -48,8 +51,9 @@ DB reverse:
 ## Boundaries
 
 - Flags stay thin; behavior lives in testable functions.
-- `DBProvider` separates orchestration from shell commands.
+- `DBProvider` separates orchestration from shell commands, including WordPress cache preflight and invalidation.
 - Command construction stays explicit and inspectable.
 - Minimal config selects engines: no replacements -> `none`; WordPress-looking paths -> `go-serialized`; otherwise `raw`.
 - `go-serialized` repairs PHP serialized lengths, preserves `r`/`R` references, validates by default, and skips `guid` when column names exist.
 - Dsync dumps use `--complete-insert` and `--extended-insert` so replacements remain column-aware while database imports avoid one statement per row.
+- Cache invalidation is local and site-scoped; Dsync never flushes Redis globally.

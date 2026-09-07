@@ -34,3 +34,5 @@ just release --bump patch|minor|major
 just release --dry-run --bump patch
 
 Rule: if a just task exists, use it instead of the raw underlying command.
+
+Runtime dependency: forward WordPress database syncs require wp on PATH and a valid local WordPress root discoverable from each sync[].local wp-content path. Cache invalidation runs after import and never flushes Redis globally.
