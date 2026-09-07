@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +21,7 @@ import (
 type DBDump struct {
 	Reader io.ReadCloser
 	Wait   func() error
+	cancel context.CancelFunc
 }
 
 type DBProvider interface {
@@ -40,6 +44,11 @@ func NewRealDBProvider(cfg *Config) *RealDBProvider {
 }
 
 func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, reverse bool) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	warnUnsafeRawReplacement(cfg)
 	if reverse {
 		return syncDBReverse(ctx, provider, cfg, dumpDB)
@@ -68,6 +77,7 @@ func SyncDB(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool, 
 		spinner.Fail(fmt.Sprintf("Stage 1/%d failed: remote database dump: %v", stageCount, err))
 		return fmt.Errorf("failed to dump remote db: %w", err)
 	}
+	dump.cancel = cancel
 	spinner.Success(fmt.Sprintf("Stage 1/%d complete: remote dump stream started for '%s'", stageCount, cfg.Remote.DB))
 
 	progress := &dbStreamProgress{}
@@ -126,6 +136,8 @@ func localWordPressRoots(cfg *Config) ([]string, error) {
 }
 
 func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB bool) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	pterm.DefaultSection.Println("Syncing Database (local to remote)")
 
 	spinner := startSpinner(fmt.Sprintf("Stage 1/4: starting local database dump '%s'...", cfg.Local.DB))
@@ -134,17 +146,19 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 		spinner.Fail(fmt.Sprintf("Stage 1/4 failed: local database dump: %v", err))
 		return fmt.Errorf("failed to dump local db: %w", err)
 	}
+	dump.cancel = cancel
 	spinner.Success(fmt.Sprintf("Stage 1/4 complete: local dump stream started for '%s'", cfg.Local.DB))
 
 	var reversedReplacements []DBReplace
-	for i := len(cfg.DBReplace) - 1; i >= 0; i-- {
-		r := cfg.DBReplace[i]
+	for _, r := range slices.Backward(cfg.DBReplace) {
 		reversedReplacements = append(reversedReplacements, DBReplace{From: r.To, To: r.From})
 	}
 
 	spinner = startSpinner("Stage 2/4: backing up remote database before import...")
 	if err := provider.BackupRemote(ctx); err != nil {
+		cancel()
 		_ = dump.Reader.Close()
+		err = errors.Join(err, dump.Wait())
 		spinner.Fail(fmt.Sprintf("Stage 2/4 failed: remote database backup: %v", err))
 		return fmt.Errorf("failed to backup remote db: %w", err)
 	}
@@ -165,51 +179,112 @@ func syncDBReverse(ctx context.Context, provider DBProvider, cfg *Config, dumpDB
 	return nil
 }
 
-func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replacements []DBReplace, dumpDB bool, dumpPath string, writeDB func(context.Context, io.Reader) error, progress *dbStreamProgress) error {
-	defer dump.Reader.Close()
-
-	inputReader := dump.Reader
-	if progress != nil {
-		inputReader = &countingReadCloser{ReadCloser: dump.Reader, counter: &progress.sourceBytes}
-	}
-
-	reader, transformErr := transformDumpAsync(inputReader, cfg, replacements)
-	defer reader.Close()
-
-	var input io.Reader = reader
-	if progress != nil {
-		input = &countingReader{reader: reader, counter: &progress.outputBytes}
-	}
+// writeTransformedDump owns the dump, transformer, and optional file. Every
+// exit closes the stream and reaps the process exactly once.
+func writeTransformedDump(ctx context.Context, dump *DBDump, cfg *Config, replacements []DBReplace, dumpDB bool, dumpPath string, writeDB func(context.Context, io.Reader) error, progress *dbStreamProgress) (result error) {
+	parent := ctx
+	ctx, cancel := context.WithCancel(ctx)
+	closeSource := sync.OnceFunc(func() { _ = dump.Reader.Close() })
+	defer cancel()
+	defer func() {
+		if result != nil {
+			cancel()
+			if dump.cancel != nil {
+				dump.cancel()
+			}
+		}
+		closeSource()
+		result = errors.Join(result, dump.Wait())
+	}()
 	var dumpFile *os.File
 	if dumpDB {
-		file, err := os.Create(dumpPath)
+		file, err := createPrivateDump(dumpPath)
 		if err != nil {
 			return fmt.Errorf("failed to create %s: %w", dumpPath, err)
 		}
 		dumpFile = file
-		input = io.TeeReader(input, dumpFile)
+		defer func() { result = errors.Join(result, dumpFile.Close()) }()
 	}
-
-	writeErr := writeDB(ctx, input)
-	if writeErr != nil {
-		_ = reader.Close()
+	var source io.Reader = dump.Reader
+	if progress != nil {
+		source = &countingReader{reader: source, counter: &progress.sourceBytes}
 	}
-
-	if err := <-transformErr; err != nil {
-		writeErr = err
-	}
-	if writeErr != nil {
-		_ = dump.Reader.Close()
-	}
-	if err := dump.Wait(); err != nil && writeErr == nil {
-		writeErr = err
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	stopped := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		closeSource()
+		_ = reader.CloseWithError(ctx.Err())
+		_ = writer.CloseWithError(ctx.Err())
+		close(stopped)
+	})
+	defer func() {
+		if !stop() {
+			<-stopped
+		}
+	}()
+	go func() {
+		err := TransformSQLDump(&contextReader{ctx: ctx, reader: source}, writer, ReplacementOptionsFromConfig(cfg, replacements))
+		_ = writer.CloseWithError(err)
+		if err != nil {
+			cancel()
+		}
+		done <- err
+	}()
+	var input io.Reader = reader
+	if progress != nil {
+		input = &countingReader{reader: input, counter: &progress.outputBytes}
 	}
 	if dumpFile != nil {
-		if err := dumpFile.Close(); err != nil && writeErr == nil {
-			writeErr = fmt.Errorf("failed to close %s: %w", dumpPath, err)
-		}
+		input = io.TeeReader(input, dumpFile)
 	}
-	return writeErr
+	writeErr := writeDB(ctx, input)
+	// Also handle consumers that return successfully without draining the stream.
+	_ = reader.Close()
+	closeSource()
+	if writeErr != nil {
+		cancel()
+		closeSource()
+	}
+	transformErr := <-done
+	if writeErr != nil && (errors.Is(transformErr, io.ErrClosedPipe) || errors.Is(transformErr, context.Canceled)) {
+		transformErr = nil
+	}
+	return errors.Join(writeErr, transformErr, parent.Err())
+}
+
+// Use an exclusive temporary inode then rename, so an existing symlink is never
+// followed and existing dumps cannot retain public permissions or hard links.
+func createPrivateDump(path string) (*os.File, error) {
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("dump destination is not a regular file")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".dsync-dump-*")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Rename(file.Name(), path); err != nil {
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return nil, err
+	}
+	return file, nil
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func warnUnsafeRawReplacement(cfg *Config) {
@@ -227,37 +302,9 @@ func isWordPressLikeConfig(cfg *Config) bool {
 	return false
 }
 
-func transformDumpAsync(input io.Reader, cfg *Config, replacements []DBReplace) (*io.PipeReader, <-chan error) {
-	reader, writer := io.Pipe()
-	errs := make(chan error, 1)
-
-	go func() {
-		err := TransformSQLDump(input, writer, ReplacementOptionsFromConfig(cfg, replacements))
-		if closeErr := writer.CloseWithError(err); closeErr != nil && err == nil {
-			err = closeErr
-		}
-		errs <- err
-	}()
-
-	return reader, errs
-}
-
 type dbStreamProgress struct {
 	sourceBytes atomic.Int64
 	outputBytes atomic.Int64
-}
-
-type countingReadCloser struct {
-	io.ReadCloser
-	counter *atomic.Int64
-}
-
-func (r *countingReadCloser) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p)
-	if n > 0 {
-		r.counter.Add(int64(n))
-	}
-	return n, err
 }
 
 type countingReader struct {
@@ -333,13 +380,7 @@ func formatBytes(bytes int64) string {
 }
 
 func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
-	args := []string{
-		"-p", p.cfg.Port,
-		p.cfg.SSHHost,
-		"mysqldump", "-uroot",
-	}
-	args = append(args, mysqlDumpFlags()...)
-	args = append(args, p.cfg.Remote.DB)
+	args := sshArgs(p.cfg, shellCommand(append(append([]string{"mysqldump", "-uroot"}, mysqlDumpFlags()...), "--", p.cfg.Remote.DB)...))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	var stderr bytes.Buffer
@@ -350,6 +391,7 @@ func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
 		return nil, fmt.Errorf("failed to open ssh stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
 		return nil, fmt.Errorf("failed to start ssh dump command: %s: %w", stderr.String(), err)
 	}
 
@@ -365,18 +407,7 @@ func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
 }
 
 func (p *RealDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
-	composeFile := getComposeFilePath()
-	remoteCommand := fmt.Sprintf(
-		"if command -v mariadb-dump >/dev/null 2>&1; then mariadb-dump -uroot -psecret %s %s; else mysqldump -uroot -psecret %s %s; fi",
-		strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Local.DB), strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Local.DB),
-	)
-
-	args := []string{
-		"compose",
-		"-f", composeFile,
-		"exec", "-T",
-		"mariadb", "sh", "-c", remoteCommand,
-	}
+	args := composeArgs(getComposeFilePath(), "sh", "-c", localDumpCommand(p.cfg.Local.DB))
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	var stderr bytes.Buffer
@@ -387,6 +418,7 @@ func (p *RealDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
 		return nil, fmt.Errorf("failed to open docker stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
 		return nil, fmt.Errorf("failed to start docker dump command: %s: %w", stderr.String(), err)
 	}
 
@@ -402,14 +434,11 @@ func (p *RealDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
 }
 
 func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump io.Reader) error {
-	args := []string{
-		"-p", p.cfg.Port,
-		p.cfg.SSHHost,
-		"mysql", "-uroot", p.cfg.Remote.DB,
-	}
+	args := sshArgs(p.cfg, shellCommand("mysql", "-uroot", "--", p.cfg.Remote.DB))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin = sqlDump
+	cmd.WaitDelay = time.Second
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ssh command failed: %s: %w", string(output), err)
@@ -425,17 +454,11 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump io.Reader) erro
 		return err
 	}
 
-	args := []string{
-		"compose",
-		"-f", composeFile,
-		"exec", "-T",
-		"mariadb", "mariadb",
-		"-uroot", "-psecret",
-		p.cfg.Local.DB,
-	}
+	args := composeArgs(composeFile, "mariadb", "-uroot", "-psecret", "--", p.cfg.Local.DB)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Stdin = sqlDump
+	cmd.WaitDelay = time.Second
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("docker command failed: %s: %w", string(output), err)
@@ -445,15 +468,7 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump io.Reader) erro
 }
 
 func (p *RealDBProvider) BackupRemote(ctx context.Context) error {
-	timestamp := time.Now().Format("20060102_150405")
-	backupFile := fmt.Sprintf("%s_backup_%s.sql", p.cfg.Remote.DB, timestamp)
-	remoteCmd := fmt.Sprintf("mysqldump -uroot %s %s > %s", strings.Join(mysqlDumpFlags(), " "), shellQuote(p.cfg.Remote.DB), shellQuote(backupFile))
-
-	args := []string{
-		"-p", p.cfg.Port,
-		p.cfg.SSHHost,
-		remoteCmd,
-	}
+	args := sshArgs(p.cfg, remoteBackupCommand(p.cfg.Remote.DB))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	output, err := cmd.CombinedOutput()
@@ -519,21 +534,7 @@ func (p *RealDBProvider) FlushLocalCache(ctx context.Context, wordpressRoots []s
 }
 
 func ensureUserAndDB(ctx context.Context, dbName, composeFile string) error {
-	query := fmt.Sprintf(
-		"CREATE USER IF NOT EXISTS `%[1]s`@'%%' IDENTIFIED BY 'secret'; "+
-			"CREATE DATABASE IF NOT EXISTS `%[1]s`; "+
-			"GRANT ALL PRIVILEGES ON `%[1]s`.* TO `%[1]s`@'%%';",
-		dbName,
-	)
-
-	args := []string{
-		"compose",
-		"-f", composeFile,
-		"exec", "-T",
-		"mariadb", "mariadb",
-		"-uroot", "-psecret",
-		"-e", query,
-	}
+	args := composeArgs(composeFile, "mariadb", "-uroot", "-psecret", "-e", createUserAndDBQuery(dbName))
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	output, err := cmd.CombinedOutput()
@@ -569,25 +570,63 @@ func ApplyDBReplacements(sql string, replacements []DBReplace) string {
 	return applyStringReplacements(sql, replacements)
 }
 
-func applyStringReplacements(value string, replacements []DBReplace) string {
-	for _, item := range replacements {
-		variations := []struct {
-			from string
-			to   string
-		}{
-			{strings.ReplaceAll(item.From, "/", `\/`), strings.ReplaceAll(item.To, "/", `\/`)},
-			{strings.ReplaceAll(item.From, "/", `\\/`), strings.ReplaceAll(item.To, "/", `\\/`)},
-			{strings.ReplaceAll(item.From, "/", `\\\/`), strings.ReplaceAll(item.To, "/", `\\\/`)},
-			{strings.ReplaceAll(item.From, "/", `\\\\/`), strings.ReplaceAll(item.To, "/", `\\\\/`)},
-			{strings.ReplaceAll(item.From, "/", `\\\\\/`), strings.ReplaceAll(item.To, "/", `\\\\\/`)},
-		}
+type compiledReplacements []DBReplace
 
-		for _, v := range variations {
-			if v.from != item.From {
-				value = strings.ReplaceAll(value, v.from, v.to)
+func compileReplacements(replacements []DBReplace) compiledReplacements {
+	compiled := make(compiledReplacements, 0, len(replacements)*6)
+	for _, item := range replacements {
+		if item.From == "" {
+			continue
+		} // Validation rejects empty effective sources.
+		for _, slash := range []string{`\/`, `\\/`, `\\\/`, `\\\\/`, `\\\\\/`} {
+			from := strings.ReplaceAll(item.From, "/", slash)
+			if from != item.From {
+				compiled = append(compiled, DBReplace{From: from, To: strings.ReplaceAll(item.To, "/", slash)})
 			}
 		}
+		compiled = append(compiled, item)
+	}
+	return compiled
+}
+func (compiled compiledReplacements) apply(value string) string {
+	for _, item := range compiled {
 		value = strings.ReplaceAll(value, item.From, item.To)
 	}
 	return value
+}
+func applyStringReplacements(value string, replacements []DBReplace) string {
+	return compileReplacements(replacements).apply(value)
+}
+
+func sshArgs(cfg *Config, command string) []string {
+	return []string{"-p", cfg.Port, "--", cfg.SSHHost, command}
+}
+func shellCommand(args ...string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = shellQuote(arg)
+	}
+	return strings.Join(quoted, " ")
+}
+func composeArgs(file string, args ...string) []string {
+	return append([]string{"compose", "-f", file, "exec", "-T", "mariadb"}, args...)
+}
+func localDumpCommand(db string) string {
+	args := append([]string{"-uroot", "-psecret"}, mysqlDumpFlags()...)
+	args = append(args, "--", db)
+	return "if command -v mariadb-dump >/dev/null 2>&1; then " + shellCommand(append([]string{"mariadb-dump"}, args...)...) + "; else " + shellCommand(append([]string{"mysqldump"}, args...)...) + "; fi"
+}
+func remoteBackupCommand(db string) string {
+	args := append([]string{"mysqldump", "-uroot"}, mysqlDumpFlags()...)
+	args = append(args, "--", db)
+	// mktemp creates a private, collision-safe file in the remote working directory.
+	// Keep partial backups on failure for diagnosis; never proceed with import.
+	return "umask 077; backup=$(mktemp ./dsync-backup-XXXXXXXXXX.sql) && " + shellCommand(args...) + " > \"$backup\""
+}
+func sqlIdentifier(value string) string { return "`" + strings.ReplaceAll(value, "`", "``") + "`" }
+func sqlAccount(value string) string {
+	return "'" + strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), "'", "''") + "'"
+}
+func createUserAndDBQuery(db string) string {
+	return fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY 'secret'; CREATE DATABASE IF NOT EXISTS %s; GRANT ALL PRIVILEGES ON %s.* TO %s@'%%';", sqlAccount(db), sqlIdentifier(db), sqlIdentifier(db), sqlAccount(db))
 }

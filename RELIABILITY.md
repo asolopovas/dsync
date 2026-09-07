@@ -81,3 +81,12 @@ just release --dry-run --bump patch
 ```
 
 Do not manually split the release flow.
+
+## Modernization regression checks
+
+Use Go 1.27.1 for the recorded comparison. Parser fuzz targets are
+`FuzzPHPSerialized` and `FuzzSQLDump`; run each with `go test -run '^$' -fuzz
+'^<target>$' -fuzztime=30s`. Exclusion tests use local rsync and synthetic trees.
+Use `go test -run '^$' -bench . -benchmem -count=6` and `benchstat` for repeated
+comparisons. `govulncheck ./...` scans the resolved runtime dependency graph.
+No private-site sync or installation is required for these checks.

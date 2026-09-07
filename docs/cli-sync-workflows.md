@@ -2,7 +2,7 @@
 
 ## Setup
 
-- `dsync --gen` creates `dsync-config.json`.
+- `dsync --gen` exclusively creates `dsync-config.json` with mode `0600`; an existing file or symlink is an error.
 - `-c/--config` selects a config.
 - Real configs stay ignored/private.
 
@@ -28,3 +28,17 @@
 - Replacement order follows [`sync-and-replacement.md`](sync-and-replacement.md).
 - Errors include enough command output to diagnose tools or access.
 - A cache-flush failure exits nonzero and makes clear that the local database import already succeeded.
+
+## Validation and failure behavior
+
+SSH host and numeric port are checked before sync. File operations require
+nonempty directory endpoints; DB operations require both database names.
+Unknown JSON fields remain accepted, and combined sync flags still work.
+Unknown replacement engines and empty effective replacement sources are errors.
+Positional arguments are rejected; `--dump` requires `--db` or `--all`.
+
+Rsync failure stops replacements, remaining paths, and DB dispatch. Interrupts
+cancel the active operation. Local dump files have mode `0600`; existing regular
+dumps are replaced, and symlink/nonregular destinations are rejected. Reverse
+backups use private, random `dsync-backup-<random>.sql` names in the remote working
+directory, and backup failure prevents import.

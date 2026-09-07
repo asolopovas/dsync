@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Stack: Go 1.23 · Cobra · pterm · rsync/ssh · Docker Compose + MariaDB/MySQL.
+Stack: Go 1.27 · Cobra · pterm · rsync/ssh · Docker Compose + MariaDB/MySQL.
 
 This file is a map. Open only the docs needed for the task.
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -20,6 +21,8 @@ type ReplacementOptions struct {
 	ValidateSerialized bool
 	Replacements       []DBReplace
 	SkipColumns        []string
+	compiled           compiledReplacements
+	skipped            map[string]struct{}
 }
 
 type sqlValue struct {
@@ -71,79 +74,140 @@ func TransformSQLDump(input io.Reader, output io.Writer, options ReplacementOpti
 		return fmt.Errorf("unsupported dbReplaceEngine %q", options.Engine)
 	}
 
+	options = prepareReplacementOptions(options)
 	reader := bufio.NewReader(input)
 	for {
-		statement, err := readSQLStatement(reader)
+		statement, readErr := readSQLStatement(reader)
 		if len(statement) > 0 {
 			transformed := statement
+			var err error
 			if options.Engine == DBReplaceEngineGoSerialized {
 				transformed, err = transformInsertStatement(statement, options)
 				if err != nil {
-					return err
+					return errors.Join(err, nonEOF(readErr))
 				}
 			} else {
-				transformed = applyStringReplacements(statement, options.Replacements)
+				transformed = options.compiled.apply(statement)
 			}
 			if _, writeErr := io.WriteString(output, transformed); writeErr != nil {
-				return writeErr
+				return errors.Join(writeErr, nonEOF(readErr))
 			}
 		}
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
+		if readErr != nil {
+			return nonEOF(readErr)
 		}
 	}
 }
 
+// Statement framing understands dump comments and SQL quote delimiters. Stored
+// routines using client DELIMITER directives are outside the dump format.
 func readSQLStatement(reader *bufio.Reader) (string, error) {
 	var builder strings.Builder
-	inSingleQuote := false
-	escaped := false
-
+	var quote byte
+	escaped, lineComment, blockComment := false, false, false
+	var previous byte
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
-			if err == io.EOF && builder.Len() > 0 {
-				return builder.String(), io.EOF
+			if errors.Is(err, io.EOF) && (quote != 0 || blockComment) {
+				return builder.String(), fmt.Errorf("truncated SQL quote or comment: %w", io.ErrUnexpectedEOF)
 			}
 			return builder.String(), err
 		}
-
 		builder.WriteByte(b)
-		if inSingleQuote {
+		if lineComment {
+			if b == '\n' {
+				lineComment = false
+			}
+			continue
+		}
+		if blockComment {
+			if previous == '*' && b == '/' {
+				blockComment = false
+				previous = 0
+			} else {
+				previous = b
+			}
+			continue
+		}
+		if quote != 0 {
 			if escaped {
 				escaped = false
 				continue
 			}
-			switch b {
-			case '\\':
+			if b == '\\' && quote != '`' {
 				escaped = true
-			case '\'':
-				inSingleQuote = false
+				continue
+			}
+			if b == quote {
+				next, _ := reader.Peek(1)
+				if len(next) > 0 && next[0] == quote {
+					nextByte, _ := reader.ReadByte()
+					builder.WriteByte(nextByte)
+				} else {
+					quote = 0
+				}
 			}
 			continue
 		}
-
 		switch b {
-		case '\'':
-			inSingleQuote = true
+		case '\'', '"', '`':
+			quote = b
+		case '#':
+			lineComment = true
+		case '-':
+			next, _ := reader.Peek(2)
+			if len(next) == 2 && next[0] == '-' && next[1] <= ' ' {
+				lineComment = true
+			}
+		case '/':
+			next, _ := reader.Peek(1)
+			if len(next) > 0 && next[0] == '*' {
+				nextByte, _ := reader.ReadByte()
+				builder.WriteByte(nextByte)
+				blockComment = true
+				previous = 0
+			}
 		case ';':
 			return builder.String(), nil
 		}
 	}
 }
 
+func skipSQLTrivia(input string, pos int) int {
+	for {
+		pos = skipSQLSpaces(input, pos)
+		rest := input[pos:]
+		if strings.HasPrefix(rest, "#") || (strings.HasPrefix(rest, "--") && len(rest) > 2 && rest[2] <= ' ') {
+			end := strings.IndexByte(rest, '\n')
+			if end < 0 {
+				return len(input)
+			}
+			pos += end + 1
+		} else if strings.HasPrefix(rest, "/*") {
+			end := strings.Index(rest[2:], "*/")
+			if end < 0 {
+				return len(input)
+			}
+			pos += end + 4
+		} else {
+			return pos
+		}
+	}
+}
+
 func transformInsertStatement(statement string, options ReplacementOptions) (string, error) {
-	trimmed := strings.TrimLeftFunc(statement, unicode.IsSpace)
+	options = prepareReplacementOptions(options)
+	offset := skipSQLTrivia(statement, 0)
+	trimmed := statement[offset:]
 	if !hasPrefixFold(trimmed, "INSERT INTO") {
 		return statement, nil
 	}
 
-	valuesIndex := findSQLKeyword(statement, "VALUES")
-	if valuesIndex == -1 {
-		return statement, nil
+	relativeValues := findSQLKeyword(trimmed, "VALUES")
+	valuesIndex := offset + relativeValues
+	if relativeValues == -1 {
+		return "", fmt.Errorf("parse INSERT values: missing VALUES")
 	}
 
 	head := statement[:valuesIndex]
@@ -154,29 +218,30 @@ func transformInsertStatement(statement string, options ReplacementOptions) (str
 		suffix = ";"
 	}
 
-	tableName, columns, err := parseInsertHeader(head)
+	tableName, columns, err := parseInsertHeader(head[offset:])
 	if err != nil {
 		return "", fmt.Errorf("parse INSERT header: %w", err)
 	}
 
 	rows, err := parseSQLValues(valuesPart)
+	if err == nil && len(rows) == 0 {
+		err = fmt.Errorf("missing rows")
+	}
 	if err != nil {
 		return "", fmt.Errorf("parse INSERT values: %w", err)
 	}
 
-	skipColumns := make(map[string]struct{}, len(options.SkipColumns))
-	for _, column := range options.SkipColumns {
-		skipColumns[strings.ToLower(column)] = struct{}{}
-	}
-
 	for rowIndex := range rows {
+		if len(columns) > 0 && len(rows[rowIndex]) != len(columns) {
+			return "", fmt.Errorf("parse INSERT values: row %d has %d values for %d columns", rowIndex+1, len(rows[rowIndex]), len(columns))
+		}
 		for columnIndex := range rows[rowIndex] {
 			value := &rows[rowIndex][columnIndex]
 			if !value.IsString {
 				continue
 			}
 			if columnIndex < len(columns) {
-				if _, skip := skipColumns[strings.ToLower(columns[columnIndex])]; skip {
+				if _, skip := options.skipped[strings.ToLower(columns[columnIndex])]; skip {
 					continue
 				}
 			}
@@ -192,61 +257,79 @@ func transformInsertStatement(statement string, options ReplacementOptions) (str
 }
 
 func parseInsertHeader(head string) (string, []string, error) {
-	afterIntoIndex := indexFold(head, "INSERT INTO")
-	if afterIntoIndex == -1 {
-		return "", nil, nil
-	}
-
-	pos := afterIntoIndex + len("INSERT INTO")
-	pos = skipSQLSpaces(head, pos)
-	if pos >= len(head) {
-		return "", nil, nil
-	}
-
-	tableName, nextPos, err := parseSQLIdentifier(head, pos)
+	pos := skipSQLTrivia(head, len("INSERT INTO"))
+	table, pos, err := parseSQLIdentifier(head, pos)
 	if err != nil {
 		return "", nil, err
 	}
-	pos = skipSQLSpaces(head, nextPos)
-	if pos >= len(head) || head[pos] != '(' {
-		return tableName, nil, nil
+	pos = skipSQLTrivia(head, pos)
+	if pos == len(head) {
+		return table, nil, nil
 	}
-
-	end := findMatchingParen(head, pos)
-	if end == -1 {
-		return tableName, nil, fmt.Errorf("unterminated column list")
+	if head[pos] != '(' {
+		return "", nil, fmt.Errorf("expected column list")
 	}
-
-	parts := strings.Split(head[pos+1:end], ",")
-	columns := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		part = strings.Trim(part, "`")
-		if part != "" {
-			columns = append(columns, part)
+	pos++
+	var columns []string
+	for {
+		pos = skipSQLTrivia(head, pos)
+		column, next, err := parseSQLIdentifier(head, pos)
+		if err != nil {
+			return "", nil, err
 		}
+		columns = append(columns, column)
+		pos = skipSQLTrivia(head, next)
+		if pos == len(head) {
+			return "", nil, fmt.Errorf("unterminated column list")
+		}
+		if head[pos] == ')' {
+			pos++
+			break
+		}
+		if head[pos] != ',' {
+			return "", nil, fmt.Errorf("expected column separator")
+		}
+		pos++
 	}
-	return tableName, columns, nil
+	if skipSQLTrivia(head, pos) != len(head) {
+		return "", nil, fmt.Errorf("unexpected INSERT header suffix")
+	}
+	return table, columns, nil
 }
 
 func parseSQLIdentifier(input string, pos int) (string, int, error) {
+	if pos >= len(input) {
+		return "", pos, fmt.Errorf("missing SQL identifier")
+	}
 	if input[pos] == '`' {
 		pos++
-		start := pos
-		for pos < len(input) && input[pos] != '`' {
+		var builder strings.Builder
+		for pos < len(input) {
+			b := input[pos]
 			pos++
+			if b == '`' {
+				if pos < len(input) && input[pos] == '`' {
+					builder.WriteByte('`')
+					pos++
+					continue
+				}
+				if builder.Len() == 0 {
+					return "", pos, fmt.Errorf("empty SQL identifier")
+				}
+				return builder.String(), pos, nil
+			}
+			builder.WriteByte(b)
 		}
-		if pos >= len(input) {
-			return "", pos, fmt.Errorf("unterminated quoted identifier")
-		}
-		return input[start:pos], pos + 1, nil
+		return "", pos, fmt.Errorf("unterminated quoted identifier")
 	}
-
 	start := pos
-	for pos < len(input) && !unicode.IsSpace(rune(input[pos])) && input[pos] != '(' {
+	for pos < len(input) && !unicode.IsSpace(rune(input[pos])) && !strings.ContainsRune("(),;", rune(input[pos])) {
 		pos++
 	}
-	return strings.Trim(input[start:pos], "`"), pos, nil
+	if pos == start {
+		return "", pos, fmt.Errorf("missing SQL identifier")
+	}
+	return input[start:pos], pos, nil
 }
 
 func tableNameForError(tableName string) string {
@@ -260,7 +343,7 @@ func parseSQLValues(input string) ([][]sqlValue, error) {
 	var rows [][]sqlValue
 	pos := 0
 	for {
-		pos = skipSQLSpacesAndCommas(input, pos)
+		pos = skipSQLSpaces(input, pos)
 		if pos >= len(input) {
 			break
 		}
@@ -287,6 +370,9 @@ func parseSQLValues(input string) ([][]sqlValue, error) {
 					pos++
 				}
 				value.Raw = strings.TrimSpace(input[start:pos])
+				if value.Raw == "" {
+					return nil, fmt.Errorf("empty SQL value at byte %d", start)
+				}
 			}
 			if err != nil {
 				return nil, err
@@ -309,6 +395,17 @@ func parseSQLValues(input string) ([][]sqlValue, error) {
 			}
 		}
 	nextRow:
+		pos = skipSQLSpaces(input, pos)
+		if pos == len(input) {
+			break
+		}
+		if input[pos] != ',' {
+			return nil, fmt.Errorf("expected row separator at byte %d", pos)
+		}
+		pos = skipSQLSpaces(input, pos+1)
+		if pos == len(input) {
+			return nil, fmt.Errorf("trailing row separator")
+		}
 	}
 	return rows, nil
 }
@@ -323,6 +420,11 @@ func parseSQLString(input string, pos int) (string, int, error) {
 		b := input[pos]
 		pos++
 		if b == '\'' {
+			if pos < len(input) && input[pos] == '\'' {
+				builder.WriteByte('\'')
+				pos++
+				continue
+			}
 			return builder.String(), pos, nil
 		}
 		if b != '\\' {
@@ -361,23 +463,33 @@ func parseSQLString(input string, pos int) (string, int, error) {
 }
 
 func formatSQLRows(rows [][]sqlValue) string {
-	formattedRows := make([]string, 0, len(rows))
-	for _, row := range rows {
-		values := make([]string, 0, len(row))
-		for _, value := range row {
+	var builder strings.Builder
+	for i, row := range rows {
+		if i > 0 {
+			builder.WriteByte(',')
+		}
+		builder.WriteByte('(')
+		for j, value := range row {
+			if j > 0 {
+				builder.WriteByte(',')
+			}
 			if value.IsString {
-				values = append(values, quoteSQLString(value.String))
+				writeSQLString(&builder, value.String)
 			} else {
-				values = append(values, value.Raw)
+				builder.WriteString(value.Raw)
 			}
 		}
-		formattedRows = append(formattedRows, "("+strings.Join(values, ",")+")")
+		builder.WriteByte(')')
 	}
-	return strings.Join(formattedRows, ",")
+	return builder.String()
 }
 
 func quoteSQLString(value string) string {
 	var builder strings.Builder
+	writeSQLString(&builder, value)
+	return builder.String()
+}
+func writeSQLString(builder *strings.Builder, value string) {
 	builder.WriteByte('\'')
 	for i := 0; i < len(value); i++ {
 		switch value[i] {
@@ -402,12 +514,11 @@ func quoteSQLString(value string) string {
 		}
 	}
 	builder.WriteByte('\'')
-	return builder.String()
 }
 
 func transformSQLString(value string, options ReplacementOptions) (string, error) {
 	if isSerializedPHP(value) {
-		transformed, err := transformSerializedPHP(value, options.Replacements)
+		transformed, err := transformSerializedPHPCompiled(value, prepareReplacementOptions(options).compiled)
 		if err != nil {
 			return value, nil
 		}
@@ -418,19 +529,14 @@ func transformSQLString(value string, options ReplacementOptions) (string, error
 		}
 		return transformed, nil
 	}
-	return applyStringReplacements(value, options.Replacements), nil
+	return prepareReplacementOptions(options).compiled.apply(value), nil
 }
 
 func hasPrefixFold(value, prefix string) bool {
 	return len(value) >= len(prefix) && strings.EqualFold(value[:len(prefix)], prefix)
 }
 
-func indexFold(value, needle string) int {
-	return strings.Index(strings.ToLower(value), strings.ToLower(needle))
-}
-
 func findSQLKeyword(input, keyword string) int {
-	upperKeyword := strings.ToUpper(keyword)
 	inSingleQuote := false
 	inBacktick := false
 	escaped := false
@@ -452,6 +558,10 @@ func findSQLKeyword(input, keyword string) int {
 			}
 			continue
 		}
+		if next := skipSQLTrivia(input, i); next > i {
+			i = next - 1
+			continue
+		}
 		switch b {
 		case '\'':
 			inSingleQuote = true
@@ -460,7 +570,7 @@ func findSQLKeyword(input, keyword string) int {
 			inBacktick = true
 			continue
 		}
-		if strings.ToUpper(input[i:i+len(keyword)]) == upperKeyword && isSQLBoundary(input, i-1) && isSQLBoundary(input, i+len(keyword)) {
+		if strings.EqualFold(input[i:i+len(keyword)], keyword) && isSQLBoundary(input, i-1) && isSQLBoundary(input, i+len(keyword)) {
 			return i
 		}
 	}
@@ -480,29 +590,6 @@ func skipSQLSpaces(input string, pos int) int {
 		pos++
 	}
 	return pos
-}
-
-func skipSQLSpacesAndCommas(input string, pos int) int {
-	for pos < len(input) && (unicode.IsSpace(rune(input[pos])) || input[pos] == ',') {
-		pos++
-	}
-	return pos
-}
-
-func findMatchingParen(input string, start int) int {
-	depth := 0
-	for i := start; i < len(input); i++ {
-		switch input[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 func containsFold(values []string, needle string) bool {
@@ -545,8 +632,9 @@ type phpPair struct {
 }
 
 type phpParser struct {
-	data string
-	pos  int
+	data  string
+	pos   int
+	depth int
 }
 
 func isSerializedPHP(value string) bool {
@@ -566,6 +654,9 @@ func isSerializedPHP(value string) bool {
 }
 
 func transformSerializedPHP(value string, replacements []DBReplace) (string, error) {
+	return transformSerializedPHPCompiled(value, compileReplacements(replacements))
+}
+func transformSerializedPHPCompiled(value string, replacements compiledReplacements) (string, error) {
 	parsed, err := parsePHPSerialized(value)
 	if err != nil {
 		return "", err
@@ -589,9 +680,19 @@ func parsePHPSerialized(value string) (phpValue, error) {
 	return parsed, nil
 }
 
+const maxSerializedDepth = 20
+
 func (p *phpParser) parseValue() (phpValue, error) {
+	if p.depth > maxSerializedDepth {
+		return phpValue{}, fmt.Errorf("serialized recursion depth exceeded")
+	}
+	p.depth++
+	defer func() { p.depth-- }()
 	if p.pos >= len(p.data) {
 		return phpValue{}, fmt.Errorf("unexpected end of serialized data")
+	}
+	if p.data[p.pos] != 'N' && (p.pos+1 >= len(p.data) || p.data[p.pos+1] != ':') {
+		return phpValue{}, fmt.Errorf("missing serialized type separator")
 	}
 	switch p.data[p.pos] {
 	case 'N':
@@ -605,6 +706,9 @@ func (p *phpParser) parseValue() (phpValue, error) {
 		value, err := p.readUntil(';')
 		if err != nil {
 			return phpValue{}, err
+		}
+		if value != "0" && value != "1" {
+			return phpValue{}, fmt.Errorf("invalid boolean")
 		}
 		return phpValue{Kind: phpBool, Bool: value == "1"}, nil
 	case 'i':
@@ -622,6 +726,9 @@ func (p *phpParser) parseValue() (phpValue, error) {
 		p.pos += 2
 		value, err := p.readUntil(';')
 		if err != nil {
+			return phpValue{}, err
+		}
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
 			return phpValue{}, err
 		}
 		return phpValue{Kind: phpFloat, Float: value}, nil
@@ -644,14 +751,14 @@ func (p *phpParser) parseString() (phpValue, error) {
 	if err != nil {
 		return phpValue{}, err
 	}
-	length, err := strconv.Atoi(lengthValue)
+	length, err := parsePHPSize(lengthValue)
 	if err != nil {
 		return phpValue{}, err
 	}
 	if err := p.expect('"'); err != nil {
 		return phpValue{}, err
 	}
-	if p.pos+length > len(p.data) {
+	if length > len(p.data)-p.pos {
 		return phpValue{}, fmt.Errorf("string length %d exceeds remaining data", length)
 	}
 	value := p.data[p.pos : p.pos+length]
@@ -672,8 +779,8 @@ func (p *phpParser) parseReference() (phpValue, error) {
 	if err != nil {
 		return phpValue{}, err
 	}
-	if _, err := strconv.Atoi(reference); err != nil {
-		return phpValue{}, err
+	if n, err := parsePHPSize(reference); err != nil || n == 0 {
+		return phpValue{}, fmt.Errorf("invalid reference %q", reference)
 	}
 	return phpValue{Kind: phpReference, ReferenceType: referenceType, Reference: reference}, nil
 }
@@ -684,15 +791,18 @@ func (p *phpParser) parseArray() (phpValue, error) {
 	if err != nil {
 		return phpValue{}, err
 	}
-	count, err := strconv.Atoi(countValue)
+	count, err := parsePHPSize(countValue)
 	if err != nil {
 		return phpValue{}, err
 	}
 	if err := p.expect('{'); err != nil {
 		return phpValue{}, err
 	}
-	pairs := make([]phpPair, 0, count)
-	for i := 0; i < count; i++ {
+	if count > (len(p.data)-p.pos)/4 {
+		return phpValue{}, fmt.Errorf("pair count exceeds remaining data")
+	}
+	var pairs []phpPair
+	for range count {
 		key, err := p.parseValue()
 		if err != nil {
 			return phpValue{}, err
@@ -715,14 +825,14 @@ func (p *phpParser) parseObject() (phpValue, error) {
 	if err != nil {
 		return phpValue{}, err
 	}
-	classLength, err := strconv.Atoi(classLengthValue)
+	classLength, err := parsePHPSize(classLengthValue)
 	if err != nil {
 		return phpValue{}, err
 	}
 	if err := p.expect('"'); err != nil {
 		return phpValue{}, err
 	}
-	if p.pos+classLength > len(p.data) {
+	if classLength > len(p.data)-p.pos {
 		return phpValue{}, fmt.Errorf("object class length %d exceeds remaining data", classLength)
 	}
 	className := p.data[p.pos : p.pos+classLength]
@@ -737,15 +847,18 @@ func (p *phpParser) parseObject() (phpValue, error) {
 	if err != nil {
 		return phpValue{}, err
 	}
-	count, err := strconv.Atoi(countValue)
+	count, err := parsePHPSize(countValue)
 	if err != nil {
 		return phpValue{}, err
 	}
 	if err := p.expect('{'); err != nil {
 		return phpValue{}, err
 	}
-	pairs := make([]phpPair, 0, count)
-	for i := 0; i < count; i++ {
+	if count > (len(p.data)-p.pos)/4 {
+		return phpValue{}, fmt.Errorf("pair count exceeds remaining data")
+	}
+	var pairs []phpPair
+	for range count {
 		key, err := p.parseValue()
 		if err != nil {
 			return phpValue{}, err
@@ -783,14 +896,17 @@ func (p *phpParser) expect(want byte) error {
 	return nil
 }
 
-func transformPHPValue(value phpValue, replacements []DBReplace, depth int) (phpValue, error) {
-	if depth > 20 {
+func transformPHPValue(value phpValue, replacements compiledReplacements, depth int) (phpValue, error) {
+	if depth > maxSerializedDepth {
 		return value, fmt.Errorf("serialized recursion depth exceeded")
 	}
 	switch value.Kind {
 	case phpString:
 		if isSerializedPHP(value.String) {
 			nested, err := parsePHPSerialized(value.String)
+			if err != nil {
+				break
+			}
 			if err == nil {
 				transformed, err := transformPHPValue(nested, replacements, depth+1)
 				if err != nil {
@@ -800,7 +916,7 @@ func transformPHPValue(value phpValue, replacements []DBReplace, depth int) (php
 				break
 			}
 		}
-		value.String = applyStringReplacements(value.String, replacements)
+		value.String = replacements.apply(value.String)
 	case phpArray, phpObject:
 		for i := range value.Pairs {
 			key, err := transformPHPValue(value.Pairs[i].Key, replacements, depth+1)
@@ -819,41 +935,80 @@ func transformPHPValue(value phpValue, replacements []DBReplace, depth int) (php
 }
 
 func serializePHPValue(value phpValue) string {
+	var builder strings.Builder
+	writePHPValue(&builder, value)
+	return builder.String()
+}
+func writePHPValue(builder *strings.Builder, value phpValue) {
 	switch value.Kind {
 	case phpNull:
-		return "N;"
+		builder.WriteString("N;")
 	case phpBool:
 		if value.Bool {
-			return "b:1;"
+			builder.WriteString("b:1;")
+		} else {
+			builder.WriteString("b:0;")
 		}
-		return "b:0;"
 	case phpInt:
-		return fmt.Sprintf("i:%d;", value.Int)
+		builder.WriteString("i:")
+		builder.WriteString(strconv.FormatInt(value.Int, 10))
+		builder.WriteByte(';')
 	case phpFloat:
-		return "d:" + value.Float + ";"
+		builder.WriteString("d:")
+		builder.WriteString(value.Float)
+		builder.WriteByte(';')
 	case phpString:
-		return fmt.Sprintf("s:%d:\"%s\";", len([]byte(value.String)), value.String)
-	case phpArray:
-		var builder strings.Builder
-		fmt.Fprintf(&builder, "a:%d:{", len(value.Pairs))
+		builder.WriteString("s:")
+		builder.WriteString(strconv.Itoa(len(value.String)))
+		builder.WriteString(":\"")
+		builder.WriteString(value.String)
+		builder.WriteString("\";")
+	case phpArray, phpObject:
+		if value.Kind == phpObject {
+			builder.WriteString("O:")
+			builder.WriteString(strconv.Itoa(len(value.ClassName)))
+			builder.WriteString(":\"")
+			builder.WriteString(value.ClassName)
+			builder.WriteString("\":")
+		} else {
+			builder.WriteString("a:")
+		}
+		builder.WriteString(strconv.Itoa(len(value.Pairs)))
+		builder.WriteString(":{")
 		for _, pair := range value.Pairs {
-			builder.WriteString(serializePHPValue(pair.Key))
-			builder.WriteString(serializePHPValue(pair.Value))
+			writePHPValue(builder, pair.Key)
+			writePHPValue(builder, pair.Value)
 		}
 		builder.WriteByte('}')
-		return builder.String()
-	case phpObject:
-		var builder strings.Builder
-		fmt.Fprintf(&builder, "O:%d:\"%s\":%d:{", len([]byte(value.ClassName)), value.ClassName, len(value.Pairs))
-		for _, pair := range value.Pairs {
-			builder.WriteString(serializePHPValue(pair.Key))
-			builder.WriteString(serializePHPValue(pair.Value))
-		}
-		builder.WriteByte('}')
-		return builder.String()
 	case phpReference:
-		return fmt.Sprintf("%c:%s;", value.ReferenceType, value.Reference)
-	default:
-		return "N;"
+		builder.WriteByte(value.ReferenceType)
+		builder.WriteByte(':')
+		builder.WriteString(value.Reference)
+		builder.WriteByte(';')
 	}
+}
+
+func nonEOF(err error) error {
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
+func parsePHPSize(value string) (int, error) {
+	if value == "" || strings.Trim(value, "0123456789") != "" {
+		return 0, fmt.Errorf("invalid serialized size %q", value)
+	}
+	return strconv.Atoi(value)
+}
+func prepareReplacementOptions(options ReplacementOptions) ReplacementOptions {
+	if options.compiled == nil {
+		options.compiled = compileReplacements(options.Replacements)
+	}
+	if options.skipped == nil {
+		options.skipped = make(map[string]struct{}, len(options.SkipColumns))
+		for _, column := range options.SkipColumns {
+			options.skipped[strings.ToLower(column)] = struct{}{}
+		}
+	}
+	return options
 }

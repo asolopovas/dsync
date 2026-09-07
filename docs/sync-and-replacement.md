@@ -21,7 +21,7 @@ Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
 
 - Forward DB sync: `from -> to` in listed order.
 - Reverse DB sync: `to -> from` in reverse list order.
-- Forward file sync: when `sync[].replace` is true, Dsync applies `from -> to` to synced text files after rsync. Use this for generated WordPress CSS/JS that contains absolute remote URLs.
+- Forward file sync: when `sync[].replace` is true, Dsync applies `from -> to` to destination text files after rsync. The traversal honors rsync exclusions relative to each sync root, prunes excluded directories, and skips symlinks and nonregular files. Changes are atomic and preserve file permissions and modification times. Use this for generated WordPress CSS/JS that contains absolute remote URLs.
 - Use clean URL/path values; engines also handle slash-escaped variants such as `\/`.
 
 ## WordPress object cache
@@ -47,3 +47,10 @@ Legacy configs may override `dbReplaceEngine`, `validateSerialized`, or `skipCol
 - WP-CLI is a runtime dependency only for forward WordPress database syncs; there are no cache-related flags or config fields.
 - Invalid pre-existing serialized values pass through unchanged; Dsync avoids raw-editing data it cannot repair.
 - Validation failures report table/row/column when a parsed transformed value becomes invalid. Disabling validation risks corrupted serialized data.
+
+- PHP declared sizes must be nonnegative, fit an integer, and fit remaining input;
+  array/object allocations grow from parsed data. Parsing and transformation use
+  a depth limit of 20. Invalid nested serialized strings also remain unchanged.
+- Dump parsing retains statement-based streaming: peak memory depends on the
+  largest statement, including extended inserts. Custom client `DELIMITER`
+  directives and stored-routine dumps are outside the supported format.

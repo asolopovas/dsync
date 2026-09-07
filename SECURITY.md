@@ -25,3 +25,8 @@ Configs may reveal hosts, paths, DB names, and replacement targets. Dumps may co
 - Preserve context-aware external commands.
 - Keep shell construction explicit and testable.
 - Names and output must include direction and target for remote writes.
+
+Generated configs use exclusive creation and mode `0600`. Local dumps use new
+private inodes and reject symlink/nonregular destinations. Remote backups use
+`umask 077` and `mktemp`, preserving backup-before-import. Shell arguments,
+SQL identifiers, and SQL account names have separate quoting helpers.

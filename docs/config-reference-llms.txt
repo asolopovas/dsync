@@ -24,3 +24,5 @@ Forward replacements: from -> to in listed order.
 Reverse replacements: to -> from in reverse list order.
 
 Engine selection is automatic: no replacements -> none; WordPress-looking paths -> go-serialized; otherwise raw. Serialized validation is on by default; guid is skipped by the serialized-safe engine. Do not add legacy dbReplaceEngine, validateSerialized, or skipColumns to new configs.
+
+Validation is operation-aware: SSH host and numeric port (1..65535) are required for sync; file sync requires directory endpoints; DB sync requires local.db and remote.db. Unknown JSON fields remain accepted. Unsupported replacement engines and empty effective sources (to in reverse DB sync) are rejected before dispatch. Generated configs are exclusive 0600 files. Exclusions also govern destination file replacements; symlinks and nonregular files are skipped.

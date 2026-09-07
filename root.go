@@ -5,8 +5,10 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -16,7 +18,9 @@ import (
 var version string
 
 func Execute() {
-	if err := newRootCmd().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
@@ -49,8 +53,12 @@ func newRootCmd() *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:   "dsync",
+		Args:  cobra.NoArgs,
 		Short: fmt.Sprintf("A tool to sync files and databases between different environments version: %s", strings.TrimSpace(version)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dumpDB && !(syncFilesAndDB || syncDBOnly) {
+				return fmt.Errorf("--dump requires --db or --all")
+			}
 			// Check if any flag is set
 			flagSet := syncFilesAndDB || syncFilesOnly || syncDBOnly || dumpDB || generateConfig || showVersion
 
@@ -76,7 +84,10 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("error loading config file '%s': %w", configPath, err)
 			}
 
-			ctx := context.Background()
+			if err := cfg.Validate(syncFilesAndDB || syncFilesOnly, syncFilesAndDB || syncDBOnly, reverseSync); err != nil {
+				return err
+			}
+			ctx := cmd.Context()
 			dbProvider := NewRealDBProvider(cfg)
 
 			if syncFilesAndDB || syncFilesOnly {
@@ -112,6 +123,7 @@ func newRootCmd() *cobra.Command {
 func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion",
+		Args:  cobra.NoArgs,
 		Short: "Generate fish completion script",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			homeDir, err := os.UserHomeDir()

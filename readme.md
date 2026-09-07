@@ -87,3 +87,8 @@ just release --bump patch|minor|major
 ## License
 
 MIT
+
+## Supported toolchain
+
+Build with Go 1.27.0 or newer (verified with Go 1.27.1). macOS binaries require
+macOS 13 or newer, following the [Go 1.27 platform requirements](https://go.dev/doc/go1.27).

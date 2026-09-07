@@ -16,7 +16,7 @@ func TestWordPressFixtureImportsIntoMariaDB(t *testing.T) {
 		t.Skip("set DSYNC_INTEGRATION=1 to run Docker-backed MariaDB integration test")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	container := fmt.Sprintf("dsync-it-%d", time.Now().UnixNano())
@@ -30,6 +30,18 @@ func TestWordPressFixtureImportsIntoMariaDB(t *testing.T) {
 	defer exec.Command("docker", "rm", "-f", container).Run()
 
 	waitForMariaDB(ctx, t, container)
+
+	// Exercise SQL identifier/account escaping and option terminators against a
+	// real server, using only this disposable container.
+	unusualDB := "-dsync`'safe"
+	setup := exec.CommandContext(ctx, "docker", "exec", container, "mariadb", "-uroot", "-psecret", "-e", createUserAndDBQuery(unusualDB))
+	if output, err := setup.CombinedOutput(); err != nil {
+		t.Fatalf("quoted setup: %s: %v", output, err)
+	}
+	dump := exec.CommandContext(ctx, "docker", "exec", container, "sh", "-c", localDumpCommand(unusualDB))
+	if output, err := dump.CombinedOutput(); err != nil {
+		t.Fatalf("quoted dump: %s: %v", output, err)
+	}
 
 	data, err := os.ReadFile("testdata/wordpress-like.sql")
 	if err != nil {

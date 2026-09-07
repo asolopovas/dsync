@@ -6,6 +6,7 @@ Use prompt-local plans for small work. Check in execution plans for multi-turn, 
 
 | Plan | Status |
 | --- | --- |
+| [`docs/completed-modernization.md`](docs/completed-modernization.md) | Completed |
 | [`docs/completed-db-replacement-engine.md`](docs/completed-db-replacement-engine.md) | Completed |
 | [`docs/tech-debt-tracker.md`](docs/tech-debt-tracker.md) | Active debt ledger |
 
