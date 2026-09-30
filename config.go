@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 
 	"github.com/joho/godotenv"
 	"strconv"
@@ -47,6 +48,9 @@ type DBReplace struct {
 
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) && filepath.Base(path) == "dsync-config.json" {
+		return loadEnvironmentConfig(filepath.Join(filepath.Dir(path), ".env"))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
@@ -321,6 +325,9 @@ func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, exists := values["DSYNC_CONFIG"]; !exists {
+		additions["DSYNC_CONFIG"] = string(template)
+	}
 	if len(additions) > 0 {
 		appended, err := godotenv.Marshal(additions)
 		if err != nil {
@@ -361,4 +368,93 @@ func writePrivateConfig(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(file.Name(), path)
+}
+
+func loadEnvironmentConfig(path string) (*Config, error) {
+	values, err := godotenv.Read(path)
+	if err != nil {
+		return nil, fmt.Errorf("read project .env: %w", err)
+	}
+	get := func(key string) string {
+		if value, exists := values[key]; exists {
+			return value
+		}
+		return os.Getenv(key)
+	}
+	cfg := Config{}
+	if template := get("DSYNC_CONFIG"); template != "" {
+		if err := json.Unmarshal([]byte(template), &cfg); err != nil {
+			return nil, fmt.Errorf("invalid DSYNC_CONFIG JSON")
+		}
+		var missing string
+		expand := func(value string) string {
+			return configVariable.ReplaceAllStringFunc(value, func(reference string) string {
+				key := configVariable.FindStringSubmatch(reference)[1]
+				if _, exists := values[key]; !exists {
+					if _, exists := os.LookupEnv(key); !exists {
+						missing = key
+					}
+				}
+				return get(key)
+			})
+		}
+		cfg.SSHHost = expand(cfg.SSHHost)
+		cfg.Port = expand(cfg.Port)
+		cfg.Remote.Host = expand(cfg.Remote.Host)
+		cfg.Remote.DB = expand(cfg.Remote.DB)
+		cfg.Local.Host = expand(cfg.Local.Host)
+		cfg.Local.DB = expand(cfg.Local.DB)
+		for i := range cfg.Sync {
+			cfg.Sync[i].Remote = expand(cfg.Sync[i].Remote)
+			cfg.Sync[i].Local = expand(cfg.Sync[i].Local)
+			for j := range cfg.Sync[i].Exclude {
+				cfg.Sync[i].Exclude[j] = expand(cfg.Sync[i].Exclude[j])
+			}
+		}
+		for i := range cfg.DBReplace {
+			cfg.DBReplace[i].From = expand(cfg.DBReplace[i].From)
+			cfg.DBReplace[i].To = expand(cfg.DBReplace[i].To)
+		}
+		if missing != "" {
+			return nil, fmt.Errorf("missing .env variable %s", missing)
+		}
+		return &cfg, nil
+	}
+	cfg.SSHHost = get("DSYNC_SSH_HOST")
+	cfg.Port = get("DSYNC_PORT")
+	cfg.Remote = HostSettings{Host: get("DSYNC_REMOTE_HOST"), DB: get("DSYNC_REMOTE_DB")}
+	cfg.Local = HostSettings{Host: get("DSYNC_LOCAL_HOST"), DB: get("DSYNC_LOCAL_DB")}
+	indexes := func(prefix string) []int {
+		seen := map[int]bool{}
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		for _, entry := range os.Environ() {
+			keys = append(keys, strings.SplitN(entry, "=", 2)[0])
+		}
+		for _, key := range keys {
+			if rest, ok := strings.CutPrefix(key, prefix); ok {
+				index, _, _ := strings.Cut(rest, "_")
+				if i, err := strconv.Atoi(index); err == nil && i >= 0 {
+					seen[i] = true
+				}
+			}
+		}
+		result := make([]int, 0, len(seen))
+		for i := range seen {
+			result = append(result, i)
+		}
+		sort.Ints(result)
+		return result
+	}
+	for _, i := range indexes("DSYNC_SYNC_") {
+		prefix := fmt.Sprintf("DSYNC_SYNC_%d_", i)
+		cfg.Sync = append(cfg.Sync, SyncPath{Remote: get(prefix + "REMOTE"), Local: get(prefix + "LOCAL")})
+	}
+	for _, i := range indexes("DSYNC_DBREPLACE_") {
+		prefix := fmt.Sprintf("DSYNC_DBREPLACE_%d_", i)
+		cfg.DBReplace = append(cfg.DBReplace, DBReplace{From: get(prefix + "FROM"), To: get(prefix + "TO")})
+	}
+	return &cfg, nil
 }

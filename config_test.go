@@ -163,3 +163,51 @@ func TestCheckConfigDatabaseOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestConfigFromEnvironmentWithoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dsync-config.json")
+	env := "DSYNC_SSH_HOST=host\nDSYNC_PORT=22\nDSYNC_LOCAL_DB=local\nDSYNC_REMOTE_DB=remote\nDSYNC_SYNC_2_REMOTE=/remote\nDSYNC_SYNC_2_LOCAL=/local\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Local.DB != "local" || len(cfg.Sync) != 1 || cfg.Sync[0].Remote != "/remote" {
+		t.Fatal("incorrect env-only config")
+	}
+	if err := cfg.Validate(true, true, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(filepath.Join(dir, "missing-custom.json")); err == nil {
+		t.Fatal("custom path silently fell back")
+	}
+}
+
+func TestEnvironmentConfigPreservesOptionsAfterRemovingJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dsync-config.json")
+	cfg := Config{SSHHost: "host", Port: "22", Local: HostSettings{DB: "local"}, Remote: HostSettings{DB: "remote"}, Sync: []SyncPath{{Local: "/local", Remote: "/remote", Exclude: []string{"cache"}, Replace: true}}, DBReplace: []DBReplace{{From: "remote", To: "local"}}}
+	data, _ := json.Marshal(cfg)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	after, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(before)
+	b, _ := json.Marshal(after)
+	if string(a) != string(b) {
+		t.Fatal("env-only mode lost settings")
+	}
+}

@@ -85,7 +85,7 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("error loading config file '%s': %w", configPath, err)
 			}
 
-			validateFiles := syncFilesAndDB || syncFilesOnly
+			validateFiles := (syncFilesAndDB && len(cfg.Sync) > 0) || syncFilesOnly
 			validateDB := syncFilesAndDB || syncDBOnly
 			if checkConfig && !validateFiles && !validateDB {
 				validateFiles = len(cfg.Sync) > 0
@@ -104,7 +104,7 @@ func newRootCmd() *cobra.Command {
 			ctx := cmd.Context()
 			dbProvider := NewRealDBProvider(cfg)
 
-			if syncFilesAndDB || syncFilesOnly {
+			if (syncFilesAndDB && len(cfg.Sync) > 0) || syncFilesOnly {
 				if err := SyncFiles(ctx, cfg, reverseSync); err != nil {
 					return err
 				}

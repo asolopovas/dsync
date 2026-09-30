@@ -13,6 +13,10 @@ on decoded string values so quotes and backslashes cannot corrupt JSON.
 
 `dsync --check-config` performs migration and validates both files and DB settings
 without starting a sync. Missing references fail before writing either file.
+If the default JSON is absent, dsync loads `.env` directly. Migration saves a
+`DSYNC_CONFIG` template for retaining non-endpoint options in env-only mode;
+older `.env` files with individual `DSYNC_` endpoint variables also work.
+`--all` skips file sync when no file paths are configured.
 Keep `.env` out of Git; see the variable naming examples in [`../readme.md`](../readme.md).
 
 ## Minimal config

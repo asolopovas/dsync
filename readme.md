@@ -41,6 +41,10 @@ Minimal shape:
 }
 ```
 
+When the default `dsync-config.json` is absent, dsync loads settings directly
+from the project `.env`. An explicitly selected missing custom config remains an
+error. `dsync -a` syncs the database when no file paths are configured.
+
 On the first sync, dsync moves literal connection settings, sync directories, and
 replacement values into `.env` beside the selected config. It rewrites the JSON
 with `${DSYNC_...}` references and adds only missing variables, preserving existing
@@ -57,6 +61,10 @@ dsync --check-config
 Variables include `DSYNC_SSH_HOST`, `DSYNC_PORT`, `DSYNC_REMOTE_DB`,
 `DSYNC_LOCAL_DB`, `DSYNC_SYNC_0_REMOTE`, `DSYNC_SYNC_0_LOCAL`,
 `DSYNC_DBREPLACE_0_FROM`, and `DSYNC_DBREPLACE_0_TO`. Array indexes start at zero.
+Migration also adds `DSYNC_CONFIG`, a JSON template retaining exclusions,
+replacement flags, and optional settings for use after removing the JSON file.
+Existing `DSYNC_CONFIG` values are preserved; edit this template in `.env` when
+changing those options in env-only mode.
 You can use existing project variables explicitly, for example
 `"local": { "db": "${DB_DATABASE}" }`.
 
