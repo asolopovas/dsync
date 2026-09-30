@@ -2,6 +2,19 @@
 
 Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
 
+## Environment settings
+
+Config loads migrate literal endpoint and replacement values to `.env` beside the
+config, using `DSYNC_` variables and `${VARIABLE}` JSON references. Existing `.env`
+keys take precedence and are never overwritten. Unrelated entries, comments,
+unknown config fields, excludes, and replacement flags are preserved. Exported
+variables provide a fallback for references absent from `.env`. Expansion happens
+on decoded string values so quotes and backslashes cannot corrupt JSON.
+
+`dsync --check-config` performs migration and validates both files and DB settings
+without starting a sync. Missing references fail before writing either file.
+Keep `.env` out of Git; see the variable naming examples in [`../readme.md`](../readme.md).
+
 ## Minimal config
 
 ```json

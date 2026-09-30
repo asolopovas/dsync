@@ -6,6 +6,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"regexp"
+
+	"github.com/joho/godotenv"
 	"strconv"
 	"strings"
 	"unicode"
@@ -52,6 +56,13 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	data, err = migrateConfigEnvironment(path, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to resolve config: %w", err)
+	}
 	return &cfg, nil
 }
 
@@ -154,4 +165,200 @@ func (cfg *Config) Validate(files, database, reverse bool) error {
 		}
 	}
 	return nil
+}
+
+var configVariable = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
+	envPath := filepath.Join(filepath.Dir(path), ".env")
+	envData, err := os.ReadFile(envPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read .env: %w", err)
+	}
+	values, err := godotenv.Unmarshal(string(envData))
+	if err != nil {
+		return nil, fmt.Errorf("invalid .env syntax")
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	additions := make(map[string]string)
+	changed := false
+	resolve := func(value *string, key string) error {
+		if *value == "" {
+			return nil
+		}
+		if !configVariable.MatchString(*value) {
+			if _, exists := values[key]; !exists {
+				values[key] = *value
+				additions[key] = *value
+			}
+			*value = "${" + key + "}"
+			changed = true
+		}
+		for _, match := range configVariable.FindAllStringSubmatch(*value, -1) {
+			if _, exists := values[match[1]]; !exists {
+				if _, exists := os.LookupEnv(match[1]); !exists {
+					return fmt.Errorf("missing .env variable %s", match[1])
+				}
+			}
+		}
+		return nil
+	}
+	for _, field := range []struct{ name, key string }{{"sshHost", "DSYNC_SSH_HOST"}, {"port", "DSYNC_PORT"}} {
+		if entry, exists := raw[field.name]; exists {
+			var value string
+			if err := json.Unmarshal(entry, &value); err != nil {
+				return nil, err
+			}
+			if err := resolve(&value, field.key); err != nil {
+				return nil, err
+			}
+			raw[field.name], _ = json.Marshal(value)
+		}
+	}
+	for _, name := range []string{"remote", "local"} {
+		if entry, exists := raw[name]; exists {
+			var host map[string]json.RawMessage
+			if err := json.Unmarshal(entry, &host); err != nil {
+				return nil, err
+			}
+			for _, field := range []string{"host", "db"} {
+				if entry, exists := host[field]; exists {
+					var value string
+					if err := json.Unmarshal(entry, &value); err != nil {
+						return nil, err
+					}
+					if err := resolve(&value, "DSYNC_"+strings.ToUpper(name)+"_"+strings.ToUpper(field)); err != nil {
+						return nil, err
+					}
+					host[field], _ = json.Marshal(value)
+				}
+			}
+			raw[name], _ = json.Marshal(host)
+		}
+	}
+	for _, group := range []struct {
+		name   string
+		fields []string
+	}{{"sync", []string{"remote", "local"}}, {"dbReplace", []string{"from", "to"}}} {
+		if entry, exists := raw[group.name]; exists {
+			var rows []map[string]json.RawMessage
+			if err := json.Unmarshal(entry, &rows); err != nil {
+				return nil, err
+			}
+			for i, row := range rows {
+				for _, field := range group.fields {
+					if entry, exists := row[field]; exists {
+						var value string
+						if err := json.Unmarshal(entry, &value); err != nil {
+							return nil, err
+						}
+						if err := resolve(&value, fmt.Sprintf("DSYNC_%s_%d_%s", strings.ToUpper(group.name), i, strings.ToUpper(field))); err != nil {
+							return nil, err
+						}
+						row[field], _ = json.Marshal(value)
+					}
+				}
+			}
+			raw[group.name], _ = json.Marshal(rows)
+		}
+	}
+	template, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	// Expand decoded strings, never raw JSON, so quotes and backslashes stay valid.
+	var tree any
+	if err := json.Unmarshal(template, &tree); err != nil {
+		return nil, err
+	}
+	var expand func(any) (any, error)
+	expand = func(node any) (any, error) {
+		switch value := node.(type) {
+		case string:
+			var missing string
+			result := configVariable.ReplaceAllStringFunc(value, func(reference string) string {
+				key := configVariable.FindStringSubmatch(reference)[1]
+				if v, exists := values[key]; exists {
+					return v
+				}
+				if v, exists := os.LookupEnv(key); exists {
+					return v
+				}
+				missing = key
+				return ""
+			})
+			if missing != "" {
+				return nil, fmt.Errorf("missing .env variable %s", missing)
+			}
+			return result, nil
+		case map[string]any:
+			for key, child := range value {
+				resolved, err := expand(child)
+				if err != nil {
+					return nil, err
+				}
+				value[key] = resolved
+			}
+		case []any:
+			for i, child := range value {
+				resolved, err := expand(child)
+				if err != nil {
+					return nil, err
+				}
+				value[i] = resolved
+			}
+		}
+		return node, nil
+	}
+	resolved, err := expand(tree)
+	if err != nil {
+		return nil, err
+	}
+	result, err := json.Marshal(resolved)
+	if err != nil {
+		return nil, err
+	}
+	if len(additions) > 0 {
+		appended, err := godotenv.Marshal(additions)
+		if err != nil {
+			return nil, err
+		}
+		if len(envData) > 0 && envData[len(envData)-1] != '\n' {
+			envData = append(envData, '\n')
+		}
+		envData = append(envData, []byte(appended+"\n")...)
+		if err := writePrivateConfig(envPath, envData); err != nil {
+			return nil, err
+		}
+	}
+	if changed {
+		if err := writePrivateConfig(path, append(template, '\n')); err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func writePrivateConfig(path string, data []byte) error {
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("refusing to replace nonregular file %s", path)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".dsync-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, writeErr := file.Write(data)
+	syncErr := file.Sync()
+	if err := errors.Join(writeErr, syncErr, file.Close()); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }

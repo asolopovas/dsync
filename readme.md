@@ -41,6 +41,30 @@ Minimal shape:
 }
 ```
 
+On the first sync, dsync moves literal connection settings, sync directories, and
+replacement values into `.env` beside the selected config. It rewrites the JSON
+with `${DSYNC_...}` references and adds only missing variables, preserving existing
+`.env` values and unrelated content. Later runs resolve these references from
+`.env`; exported environment variables are a fallback for missing keys. No shell
+commands are evaluated. Missing references fail before syncing.
+
+Run migration and validation without syncing:
+
+```bash
+dsync --check-config
+```
+
+Variables include `DSYNC_SSH_HOST`, `DSYNC_PORT`, `DSYNC_REMOTE_DB`,
+`DSYNC_LOCAL_DB`, `DSYNC_SYNC_0_REMOTE`, `DSYNC_SYNC_0_LOCAL`,
+`DSYNC_DBREPLACE_0_FROM`, and `DSYNC_DBREPLACE_0_TO`. Array indexes start at zero.
+You can use existing project variables explicitly, for example
+`"local": { "db": "${DB_DATABASE}" }`.
+
+Keep `.env` ignored by Git. Migration writes changed files atomically with mode
+`0600` and refuses to replace symlinks. Configs containing only variable references
+can be versioned after reviewing their remaining options for private values.
+Previously committed values remain in Git history.
+
 Keep real configs private. See [`docs/sync-and-replacement.md`](docs/sync-and-replacement.md).
 
 ## Use

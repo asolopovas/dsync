@@ -4,7 +4,8 @@ Dsync touches remote servers, DB dumps, and private configs. Treat generated dat
 
 ## Never commit
 
-- `dsync-config.json`
+- `.env`
+- `dsync-config.json` containing literal private values
 - `configs/**`
 - `db.sql`, `db_reverse.sql`
 - `db/**`

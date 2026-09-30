@@ -49,6 +49,7 @@ func newRootCmd() *cobra.Command {
 		showVersion    bool
 		reverseSync    bool
 		configPath     string
+		checkConfig    bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -60,7 +61,7 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("--dump requires --db or --all")
 			}
 			// Check if any flag is set
-			flagSet := syncFilesAndDB || syncFilesOnly || syncDBOnly || dumpDB || generateConfig || showVersion
+			flagSet := syncFilesAndDB || syncFilesOnly || syncDBOnly || dumpDB || generateConfig || showVersion || checkConfig
 
 			if len(args) == 0 && !flagSet {
 				return cmd.Help()
@@ -84,8 +85,21 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("error loading config file '%s': %w", configPath, err)
 			}
 
-			if err := cfg.Validate(syncFilesAndDB || syncFilesOnly, syncFilesAndDB || syncDBOnly, reverseSync); err != nil {
+			validateFiles := syncFilesAndDB || syncFilesOnly
+			validateDB := syncFilesAndDB || syncDBOnly
+			if checkConfig && !validateFiles && !validateDB {
+				validateFiles = len(cfg.Sync) > 0
+				validateDB = cfg.Local.DB != "" || cfg.Remote.DB != ""
+				if !validateFiles && !validateDB {
+					return fmt.Errorf("config has no sync paths or database settings")
+				}
+			}
+			if err := cfg.Validate(validateFiles, validateDB, reverseSync); err != nil {
 				return err
+			}
+			if checkConfig {
+				pterm.Success.Println("Config valid; settings loaded from .env")
+				return nil
 			}
 			ctx := cmd.Context()
 			dbProvider := NewRealDBProvider(cfg)
@@ -114,6 +128,8 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "Get Version")
 	rootCmd.Flags().BoolVarP(&reverseSync, "reverse", "r", false, "Reverse sync (Local to Remote)")
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "dsync-config.json", "Custom config path")
+
+	rootCmd.Flags().BoolVar(&checkConfig, "check-config", false, "Migrate settings to .env and validate config without syncing")
 
 	rootCmd.AddCommand(newCompletionCmd())
 

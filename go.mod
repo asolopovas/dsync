@@ -8,6 +8,7 @@ retract (
 )
 
 require (
+	github.com/joho/godotenv v1.5.1
 	github.com/pterm/pterm v0.12.83
 	github.com/spf13/cobra v1.10.2
 )
