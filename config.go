@@ -194,9 +194,13 @@ func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
 			return nil
 		}
 		if !configVariable.MatchString(*value) {
-			if _, exists := values[key]; !exists {
+			if existing, exists := values[key]; !exists {
 				values[key] = *value
 				additions[key] = *value
+			} else if existing != *value {
+				// A literal that disagrees with .env must never be silently replaced:
+				// the stale value could point a sync at another host or database.
+				return fmt.Errorf("config value conflicts with existing .env variable %s; update or remove one of them", key)
 			}
 			*value = "${" + key + "}"
 			changed = true
@@ -329,14 +333,10 @@ func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
 		additions["DSYNC_CONFIG"] = string(template)
 	}
 	if len(additions) > 0 {
-		appended, err := godotenv.Marshal(additions)
-		if err != nil {
-			return nil, err
-		}
 		if len(envData) > 0 && envData[len(envData)-1] != '\n' {
 			envData = append(envData, '\n')
 		}
-		envData = append(envData, []byte(appended+"\n")...)
+		envData = append(envData, marshalEnvironment(additions)...)
 		if err := writePrivateConfig(envPath, envData); err != nil {
 			return nil, err
 		}
@@ -347,6 +347,22 @@ func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
 		}
 	}
 	return result, nil
+}
+
+// marshalEnvironment always quotes values; godotenv.Marshal rewrites numeric-looking
+// strings such as "0123" as integers and changes them.
+func marshalEnvironment(values map[string]string) []byte {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	escape := strings.NewReplacer(`\`, `\\`, "\n", `\n`, "\r", `\r`, `"`, `\"`, "!", `\!`, "$", `\$`, "`", "\\`")
+	var builder strings.Builder
+	for _, key := range keys {
+		builder.WriteString(key + `="` + escape.Replace(values[key]) + "\"\n")
+	}
+	return []byte(builder.String())
 }
 
 func writePrivateConfig(path string, data []byte) error {

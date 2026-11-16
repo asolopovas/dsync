@@ -127,3 +127,23 @@ func TestPHPSerializationSupportsCommonTypes(t *testing.T) {
 		t.Fatalf("transformed value is invalid: %v", err)
 	}
 }
+
+func TestSerializedLookalikesAndWhitespace(t *testing.T) {
+	options := goSerializedOptionsForTest(true, "guid")
+	options.Replacements = []DBReplace{{From: "https://old.com", To: "http://new.test"}}
+	cases := map[string]string{
+		"a: see https://old.com":                                 "a: see http://new.test",
+		"s: https://old.com":                                     "s: http://new.test",
+		`a:1:{i:0;s:22:"a: see https://old.com";}`:               `a:1:{i:0;s:22:"a: see http://new.test";}`,
+		" \n" + `a:1:{i:0;s:15:"https://old.com";}` + "\n":       " \n" + `a:1:{i:0;s:15:"http://new.test";}` + "\n",
+		`a:1:{i:0;s:25:" s:15:"https://old.com";` + "\n" + `";}`: `a:1:{i:0;s:25:" s:15:"http://new.test";` + "\n" + `";}`,
+		`a:1:{i:0;s:99:"https://old.com";}`:                      `a:1:{i:0;s:99:"https://old.com";}`,
+		"N;":                                                     "N;",
+	}
+	for input, want := range cases {
+		got, err := transformSQLString(input, options)
+		if err != nil || got != want {
+			t.Errorf("transformSQLString(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+}

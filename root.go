@@ -50,6 +50,7 @@ func newRootCmd() *cobra.Command {
 		reverseSync    bool
 		configPath     string
 		checkConfig    bool
+		skipPaths      []string
 	)
 
 	rootCmd := &cobra.Command{
@@ -97,6 +98,14 @@ func newRootCmd() *cobra.Command {
 			if err := cfg.Validate(validateFiles, validateDB, reverseSync); err != nil {
 				return err
 			}
+			skipFromFlag := cmd.Flags().Changed("skip")
+			if !skipFromFlag {
+				skipPaths = strings.Split(os.Getenv("DSYNC_SKIP"), ",")
+			}
+			fileConfig := *cfg
+			if fileConfig.Sync, err = selectSyncPaths(cfg.Sync, skipPaths, skipFromFlag); err != nil {
+				return err
+			}
 			if checkConfig {
 				pterm.Success.Println("Config valid; settings loaded from .env")
 				return nil
@@ -105,7 +114,7 @@ func newRootCmd() *cobra.Command {
 			dbProvider := NewRealDBProvider(cfg)
 
 			if (syncFilesAndDB && len(cfg.Sync) > 0) || syncFilesOnly {
-				if err := SyncFiles(ctx, cfg, reverseSync); err != nil {
+				if err := SyncFiles(ctx, &fileConfig, reverseSync); err != nil {
 					return err
 				}
 			}
@@ -129,6 +138,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVarP(&reverseSync, "reverse", "r", false, "Reverse sync (Local to Remote)")
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "dsync-config.json", "Custom config path")
 
+	rootCmd.Flags().StringSliceVar(&skipPaths, "skip", nil, "Skip sync paths by directory name or path suffix, e.g. uploads (default $DSYNC_SKIP)")
 	rootCmd.Flags().BoolVar(&checkConfig, "check-config", false, "Migrate settings to .env and validate config without syncing")
 
 	rootCmd.AddCommand(newCompletionCmd())

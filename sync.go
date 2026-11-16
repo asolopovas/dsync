@@ -71,6 +71,34 @@ func SyncFiles(ctx context.Context, cfg *Config, reverse bool) error {
 	return nil
 }
 
+// selectSyncPaths drops entries whose local or remote directory equals a skip
+// value or ends with it as a whole path suffix. In strict mode a value matching
+// nothing is an error; machine-wide DSYNC_SKIP values are not strict.
+func selectSyncPaths(paths []SyncPath, skip []string, strict bool) ([]SyncPath, error) {
+	selected := paths
+	for _, value := range skip {
+		suffix := strings.Trim(filepath.ToSlash(strings.TrimSpace(value)), "/")
+		if suffix == "" {
+			continue
+		}
+		matches := func(path string) bool {
+			path = strings.TrimRight(filepath.ToSlash(path), "/")
+			return path == suffix || strings.HasSuffix(path, "/"+suffix)
+		}
+		var kept []SyncPath
+		for _, item := range selected {
+			if !matches(item.Local) && !matches(item.Remote) {
+				kept = append(kept, item)
+			}
+		}
+		if strict && len(kept) == len(selected) {
+			return nil, fmt.Errorf("--skip %q matches no sync path", value)
+		}
+		selected = kept
+	}
+	return selected, nil
+}
+
 func rsyncArgs(cfg *Config, item SyncPath, remotePath, localPath string, reverse bool) []string {
 	args := []string{
 		"-azr", "--protect-args",

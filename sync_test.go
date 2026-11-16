@@ -158,3 +158,32 @@ func TestReplacementPreservesMetadataAndSkipsLinks(t *testing.T) {
 		t.Fatal("modified after cancel")
 	}
 }
+
+func TestSelectSyncPaths(t *testing.T) {
+	paths := []SyncPath{
+		{Remote: "/var/www/site/wp-content/plugins", Local: "/home/u/www/site.test/wp-content/plugins/"},
+		{Remote: "/var/www/site/wp-content/uploads/", Local: "./wp-content/uploads"},
+		{Remote: "/var/www/site/wp-content/my-uploads", Local: "./wp-content/my-uploads"},
+	}
+	selected, err := selectSyncPaths(paths, []string{" /uploads/ ", ""}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 2 || selected[0].Local != paths[0].Local || selected[1].Local != paths[2].Local {
+		t.Fatalf("unexpected selection: %+v", selected)
+	}
+	selected, err = selectSyncPaths(paths, []string{"wp-content/plugins", "uploads"}, true)
+	if err != nil || len(selected) != 1 || selected[0].Local != paths[2].Local {
+		t.Fatalf("unexpected selection: %+v, %v", selected, err)
+	}
+	if _, err := selectSyncPaths(paths, []string{"content"}, true); err == nil {
+		t.Fatal("expected an error for a value matching no path")
+	}
+	selected, err = selectSyncPaths(paths, []string{"content"}, false)
+	if err != nil || len(selected) != len(paths) {
+		t.Fatalf("lenient selection changed paths: %+v, %v", selected, err)
+	}
+	if len(paths) != 3 {
+		t.Fatal("input was modified")
+	}
+}

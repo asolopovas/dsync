@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -523,7 +524,7 @@ func transformSQLString(value string, options ReplacementOptions) (string, error
 			return value, nil
 		}
 		if options.ValidateSerialized && isSerializedPHP(transformed) {
-			if _, err := parsePHPSerialized(transformed); err != nil {
+			if _, err := parsePHPSerialized(strings.TrimSpace(transformed)); err != nil {
 				return "", fmt.Errorf("transformed serialized value is invalid: %w", err)
 			}
 		}
@@ -637,27 +638,28 @@ type phpParser struct {
 	depth int
 }
 
+// serializedPHPPrefix requires the full type header, so prose such as "a: note"
+// is replaced as plain text instead of being treated as unrepairable data.
+var serializedPHPPrefix = regexp.MustCompile(`^(?:N;|[bid]:[-+0-9.eEINFAN]+;|[rR]:[0-9]+;|s:[0-9]+:"|a:[0-9]+:\{|O:[0-9]+:")`)
+
 func isSerializedPHP(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "N;" {
-		return true
-	}
-	if len(value) < 4 || value[1] != ':' {
-		return false
-	}
-	switch value[0] {
-	case 'a', 'b', 'd', 'i', 'O', 's', 'R', 'r':
-		return true
-	default:
-		return false
-	}
+	return serializedPHPPrefix.MatchString(strings.TrimSpace(value))
+}
+
+// splitSerializedPHP separates the surrounding whitespace WordPress trims before
+// unserializing, so it survives the transformation byte for byte.
+func splitSerializedPHP(value string) (leading, body, trailing string) {
+	body = strings.TrimSpace(value)
+	start := strings.Index(value, body)
+	return value[:start], body, value[start+len(body):]
 }
 
 func transformSerializedPHP(value string, replacements []DBReplace) (string, error) {
 	return transformSerializedPHPCompiled(value, compileReplacements(replacements))
 }
 func transformSerializedPHPCompiled(value string, replacements compiledReplacements) (string, error) {
-	parsed, err := parsePHPSerialized(value)
+	leading, body, trailing := splitSerializedPHP(value)
+	parsed, err := parsePHPSerialized(body)
 	if err != nil {
 		return "", err
 	}
@@ -665,7 +667,7 @@ func transformSerializedPHPCompiled(value string, replacements compiledReplaceme
 	if err != nil {
 		return "", err
 	}
-	return serializePHPValue(transformed), nil
+	return leading + serializePHPValue(transformed) + trailing, nil
 }
 
 func parsePHPSerialized(value string) (phpValue, error) {
@@ -903,18 +905,17 @@ func transformPHPValue(value phpValue, replacements compiledReplacements, depth 
 	switch value.Kind {
 	case phpString:
 		if isSerializedPHP(value.String) {
-			nested, err := parsePHPSerialized(value.String)
+			leading, body, trailing := splitSerializedPHP(value.String)
+			nested, err := parsePHPSerialized(body)
 			if err != nil {
 				break
 			}
-			if err == nil {
-				transformed, err := transformPHPValue(nested, replacements, depth+1)
-				if err != nil {
-					return value, err
-				}
-				value.String = serializePHPValue(transformed)
-				break
+			transformed, err := transformPHPValue(nested, replacements, depth+1)
+			if err != nil {
+				return value, err
 			}
+			value.String = leading + serializePHPValue(transformed) + trailing
+			break
 		}
 		value.String = replacements.apply(value.String)
 	case phpArray, phpObject:

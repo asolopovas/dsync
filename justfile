@@ -84,7 +84,7 @@ test-race *args:
 
 [private]
 integration-test *args:
-    DSYNC_INTEGRATION=1 go test {{_test_packages}} -run TestWordPressFixtureImportsIntoMariaDB -count=1 {{args}}
+    DSYNC_INTEGRATION=1 go test {{_test_packages}} -run 'TestE2E|TestWordPressFixtureImportsIntoMariaDB' -count=1 {{args}}
 
 [private]
 bench pattern="Benchmark" *args:

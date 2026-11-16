@@ -78,7 +78,7 @@ func TestConfigEnvironmentMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	envPath := filepath.Join(dir, ".env")
-	existing := "APP_NAME=Project\nDSYNC_LOCAL_DB=existing\n"
+	existing := "APP_NAME=Project\nDSYNC_LOCAL_DB=local\n"
 	if err := os.WriteFile(envPath, []byte(existing), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestConfigEnvironmentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Local.DB != "existing" || cfg.Remote.DB != "remote" || cfg.SSHHost != "user@example.com" {
+	if cfg.Local.DB != "local" || cfg.Remote.DB != "remote" || cfg.SSHHost != "user@example.com" {
 		t.Fatalf("incorrect resolved endpoints")
 	}
 	if len(cfg.Sync[0].Exclude) != 1 || !cfg.Sync[0].Replace {
@@ -209,5 +209,47 @@ func TestEnvironmentConfigPreservesOptionsAfterRemovingJSON(t *testing.T) {
 	b, _ := json.Marshal(after)
 	if string(a) != string(b) {
 		t.Fatal("env-only mode lost settings")
+	}
+}
+
+func TestConfigEnvironmentRejectsConflictingLiteral(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, host, db string) string {
+		path := filepath.Join(dir, name)
+		data := `{"sshHost":"` + host + `","port":"22","remote":{"db":"` + db + `"},"local":{"db":"local"}}`
+		if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := LoadConfig(write("prod.json", "user@prod", "prod_db")); err != nil {
+		t.Fatal(err)
+	}
+	stage := write("stage.json", "user@stage", "stage_db")
+	before := readTestFile(t, stage)
+	env := readTestFile(t, filepath.Join(dir, ".env"))
+	if _, err := LoadConfig(stage); err == nil || !strings.Contains(err.Error(), "DSYNC_SSH_HOST") {
+		t.Fatalf("expected a conflict error, got %v", err)
+	}
+	if readTestFile(t, stage) != before || readTestFile(t, filepath.Join(dir, ".env")) != env {
+		t.Fatal("conflicting load changed files")
+	}
+}
+
+func TestConfigEnvironmentKeepsNumericLookingValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dsync-config.json")
+	data := `{"sshHost":"host","port":"22","remote":{"db":"0123"},"local":{"db":"+5"}}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Remote.DB != "0123" || cfg.Local.DB != "+5" || cfg.Port != "22" {
+			t.Fatalf("numeric-looking values changed: %+v", cfg)
+		}
 	}
 }

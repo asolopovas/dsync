@@ -6,8 +6,12 @@ Dsync reads `dsync-config.json` by default; `-c/--config` selects another file.
 
 Config loads migrate literal endpoint and replacement values to `.env` beside the
 config, using `DSYNC_` variables and `${VARIABLE}` JSON references. Existing `.env`
-keys take precedence and are never overwritten. Unrelated entries, comments,
-unknown config fields, excludes, and replacement flags are preserved. Exported
+keys are never overwritten. A literal that differs from an existing `.env` value
+for the same key is an error and changes neither file, so two configs sharing a
+directory, or rows reordered after migration, cannot silently inherit another
+endpoint. Unrelated entries, comments, unknown config fields, excludes, and
+replacement flags are preserved. Values are always written quoted, so
+numeric-looking strings such as `0123` keep their exact text. Exported
 variables provide a fallback for references absent from `.env`. Expansion happens
 on decoded string values so quotes and backslashes cannot corrupt JSON.
 
@@ -33,6 +37,13 @@ Keep `.env` out of Git; see the variable naming examples in [`../readme.md`](../
 ```
 
 `remote.host` and `local.host` remain in structs but current commands do not use them.
+
+## Skipping sync paths
+
+`--skip uploads` (or `DSYNC_SKIP=uploads`) omits `sync[]` entries whose local or
+remote directory equals the value or ends with it as a whole path suffix, so
+`uploads` matches `wp-content/uploads` but not `wp-content/my-uploads`. It only
+affects file sync; WordPress detection and cache flushing use the full list.
 
 ## Replacement order
 
@@ -62,6 +73,7 @@ Legacy configs may override `dbReplaceEngine`, `validateSerialized`, or `skipCol
 - Column skipping needs complete INSERT column names; Dsync dumps include them.
 - DB credentials and service names are code conventions, not config fields.
 - WP-CLI is a runtime dependency only for forward WordPress database syncs; there are no cache-related flags or config fields.
+- A value counts as PHP serialized only when it starts with a complete type header such as `a:2:{`, `s:5:"` or `i:1;`; prose like `a: note` gets plain replacement. Surrounding whitespace is preserved.
 - Invalid pre-existing serialized values pass through unchanged; Dsync avoids raw-editing data it cannot repair.
 - Validation failures report table/row/column when a parsed transformed value becomes invalid. Disabling validation risks corrupted serialized data.
 

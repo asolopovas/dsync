@@ -48,7 +48,8 @@ error. `dsync -a` syncs the database when no file paths are configured.
 On the first sync, dsync moves literal connection settings, sync directories, and
 replacement values into `.env` beside the selected config. It rewrites the JSON
 with `${DSYNC_...}` references and adds only missing variables, preserving existing
-`.env` values and unrelated content. Later runs resolve these references from
+`.env` values and unrelated content. A literal that conflicts with an existing
+`.env` value is an error, not a silent substitution. Later runs resolve these references from
 `.env`; exported environment variables are a fallback for missing keys. No shell
 commands are evaluated. Missing references fail before syncing.
 
@@ -85,7 +86,15 @@ dsync -a -r              # files + DB, local -> remote
 dsync -d --dump          # import local DB and write db.sql
 dsync -d -r --dump       # import remote DB and write db_reverse.sql
 dsync -c configs/site.json -a
+dsync -a --skip uploads  # leave out sync paths ending in "uploads"
 ```
+
+`--skip` takes directory names or path suffixes (repeatable or comma-separated)
+and omits matching `sync[]` entries from file sync in either direction; a value
+matching nothing is an error. `DSYNC_SKIP` sets a machine-wide default, for
+example on a small server that should never download media, and ignores values
+that match nothing. The flag replaces the variable. Database sync, replacement
+engine selection and the WordPress cache flush still use every configured path.
 
 Reverse DB sync backs up remote before import.
 
