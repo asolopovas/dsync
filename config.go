@@ -32,6 +32,9 @@ type Config struct {
 type HostSettings struct {
 	Host string `json:"host"`
 	DB   string `json:"db"`
+	// WPPath is the remote WordPress root. When set, remote database commands run
+	// through WP-CLI with the site's own credentials instead of root MySQL access.
+	WPPath string `json:"wpPath,omitempty"`
 }
 
 type SyncPath struct {
@@ -232,7 +235,7 @@ func migrateConfigEnvironment(path string, data []byte) ([]byte, error) {
 			if err := json.Unmarshal(entry, &host); err != nil {
 				return nil, err
 			}
-			for _, field := range []string{"host", "db"} {
+			for _, field := range []string{"host", "db", "wpPath"} {
 				if entry, exists := host[field]; exists {
 					var value string
 					if err := json.Unmarshal(entry, &value); err != nil {
@@ -418,6 +421,7 @@ func loadEnvironmentConfig(path string) (*Config, error) {
 		cfg.Port = expand(cfg.Port)
 		cfg.Remote.Host = expand(cfg.Remote.Host)
 		cfg.Remote.DB = expand(cfg.Remote.DB)
+		cfg.Remote.WPPath = expand(cfg.Remote.WPPath)
 		cfg.Local.Host = expand(cfg.Local.Host)
 		cfg.Local.DB = expand(cfg.Local.DB)
 		for i := range cfg.Sync {
@@ -438,7 +442,7 @@ func loadEnvironmentConfig(path string) (*Config, error) {
 	}
 	cfg.SSHHost = get("DSYNC_SSH_HOST")
 	cfg.Port = get("DSYNC_PORT")
-	cfg.Remote = HostSettings{Host: get("DSYNC_REMOTE_HOST"), DB: get("DSYNC_REMOTE_DB")}
+	cfg.Remote = HostSettings{Host: get("DSYNC_REMOTE_HOST"), DB: get("DSYNC_REMOTE_DB"), WPPath: get("DSYNC_REMOTE_WPPATH")}
 	cfg.Local = HostSettings{Host: get("DSYNC_LOCAL_HOST"), DB: get("DSYNC_LOCAL_DB")}
 	indexes := func(prefix string) []int {
 		seen := map[int]bool{}

@@ -38,6 +38,15 @@ Keep `.env` out of Git; see the variable naming examples in [`../readme.md`](../
 
 `remote.host` and `local.host` remain in structs but current commands do not use them.
 
+## Remote database access
+
+By default remote dumps, imports and reverse-sync backups run `mysqldump -uroot`
+and `mysql -uroot`, which needs a root SSH login. Set `remote.wpPath` to the
+remote WordPress root (`DSYNC_REMOTE_WPPATH` in `.env`) to run them through
+`wp db export` and `wp db import` instead. WP-CLI reads the credentials from
+`wp-config.php`, so an unprivileged per-site SSH user is enough. The reverse-sync
+backup script runs under `sh`, independent of the remote login shell.
+
 ## Skipping sync paths
 
 `--skip uploads` (or `DSYNC_SKIP=uploads`) omits `sync[]` entries whose local or

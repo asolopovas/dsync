@@ -380,7 +380,7 @@ func formatBytes(bytes int64) string {
 }
 
 func (p *RealDBProvider) DumpRemote(ctx context.Context) (*DBDump, error) {
-	args := sshArgs(p.cfg, shellCommand(append(append([]string{"mysqldump", "-uroot"}, mysqlDumpFlags()...), "--", p.cfg.Remote.DB)...))
+	args := sshArgs(p.cfg, shellCommand(remoteDumpArgs(p.cfg.Remote)...))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	var stderr bytes.Buffer
@@ -434,7 +434,7 @@ func (p *RealDBProvider) DumpLocal(ctx context.Context) (*DBDump, error) {
 }
 
 func (p *RealDBProvider) WriteRemote(ctx context.Context, sqlDump io.Reader) error {
-	args := sshArgs(p.cfg, shellCommand("mysql", "-uroot", "--", p.cfg.Remote.DB))
+	args := sshArgs(p.cfg, shellCommand(remoteImportArgs(p.cfg.Remote)...))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.Stdin = sqlDump
@@ -468,7 +468,7 @@ func (p *RealDBProvider) WriteLocal(ctx context.Context, sqlDump io.Reader) erro
 }
 
 func (p *RealDBProvider) BackupRemote(ctx context.Context) error {
-	args := sshArgs(p.cfg, remoteBackupCommand(p.cfg.Remote.DB))
+	args := sshArgs(p.cfg, remoteBackupCommand(p.cfg.Remote))
 
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	output, err := cmd.CombinedOutput()
@@ -616,12 +616,25 @@ func localDumpCommand(db string) string {
 	args = append(args, "--", db)
 	return "if command -v mariadb-dump >/dev/null 2>&1; then " + shellCommand(append([]string{"mariadb-dump"}, args...)...) + "; else " + shellCommand(append([]string{"mysqldump"}, args...)...) + "; fi"
 }
-func remoteBackupCommand(db string) string {
+func remoteDumpArgs(remote HostSettings) []string {
+	if remote.WPPath != "" {
+		return append([]string{"wp", "--path=" + remote.WPPath, "db", "export", "-"}, mysqlDumpFlags()...)
+	}
 	args := append([]string{"mysqldump", "-uroot"}, mysqlDumpFlags()...)
-	args = append(args, "--", db)
+	return append(args, "--", remote.DB)
+}
+func remoteImportArgs(remote HostSettings) []string {
+	if remote.WPPath != "" {
+		return []string{"wp", "--path=" + remote.WPPath, "db", "import", "-"}
+	}
+	return []string{"mysql", "-uroot", "--", remote.DB}
+}
+func remoteBackupCommand(remote HostSettings) string {
 	// mktemp creates a private, collision-safe file in the remote working directory.
 	// Keep partial backups on failure for diagnosis; never proceed with import.
-	return "umask 077; backup=$(mktemp ./dsync-backup-XXXXXXXXXX.sql) && " + shellCommand(args...) + " > \"$backup\""
+	// The script runs under sh because the remote login shell may not be POSIX.
+	script := "umask 077; backup=$(mktemp ./dsync-backup-XXXXXXXXXX.sql) && " + shellCommand(remoteDumpArgs(remote)...) + " > \"$backup\""
+	return shellCommand("sh", "-c", script)
 }
 func sqlIdentifier(value string) string { return "`" + strings.ReplaceAll(value, "`", "``") + "`" }
 func sqlAccount(value string) string {

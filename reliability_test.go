@@ -218,7 +218,7 @@ func TestRemoteBackupIsPrivateAndCollisionSafe(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	for range 2 {
-		cmd := exec.CommandContext(t.Context(), "sh", "-c", remoteBackupCommand("-db' ;"))
+		cmd := exec.CommandContext(t.Context(), "sh", "-c", remoteBackupCommand(HostSettings{DB: "-db' ;"}))
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s: %v", out, err)
@@ -372,5 +372,41 @@ func TestPipelineWriteFailureUnblocksSourceAndPreservesDiagnostics(t *testing.T)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("write failure left source blocked")
+	}
+}
+
+func TestRemoteDatabaseCommandsUseWPCLIWhenWordPressPathIsSet(t *testing.T) {
+	remote := HostSettings{DB: "site_db", WPPath: "/var/www/site's root"}
+	dump := strings.Join(remoteDumpArgs(remote), " ")
+	if !strings.HasPrefix(dump, "wp --path=/var/www/site's root db export - ") || !strings.Contains(dump, "--single-transaction") || strings.Contains(dump, "-uroot") {
+		t.Fatalf("unexpected dump command: %s", dump)
+	}
+	if got := strings.Join(remoteImportArgs(remote), " "); got != "wp --path=/var/www/site's root db import -" {
+		t.Fatalf("unexpected import command: %s", got)
+	}
+	if got := strings.Join(remoteDumpArgs(HostSettings{DB: "site_db"}), " "); !strings.HasPrefix(got, "mysqldump -uroot ") || !strings.HasSuffix(got, "-- site_db") {
+		t.Fatalf("unexpected root dump command: %s", got)
+	}
+	bin := t.TempDir()
+	work := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "wp"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\"\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", remoteBackupCommand(remote))
+	cmd.Dir = work
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, output)
+	}
+	backups, _ := filepath.Glob(filepath.Join(work, "dsync-backup-*.sql"))
+	if len(backups) != 1 {
+		t.Fatalf("expected one backup, got %v", backups)
+	}
+	data, _ := os.ReadFile(backups[0])
+	if !strings.HasPrefix(string(data), "--path=/var/www/site's root\ndb\nexport\n-\n") {
+		t.Fatalf("unexpected backup command arguments: %q", data)
+	}
+	if info, _ := os.Stat(backups[0]); info.Mode().Perm() != 0600 {
+		t.Fatalf("backup is not private: %v", info.Mode())
 	}
 }
